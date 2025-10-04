@@ -5,9 +5,9 @@ const axios = require('axios');
 const app = express();
 app.use(bodyParser.json());
 
-// Configuration - Replace with your actual values
-const PAGE_ACCESS_TOKEN = 'EAAh3KOrOCMMBPrvOoJr3nbXLzPzO2S3A7gyF2xXmXIb6yjITDztd5pUgCbzNCBsowzdIK0qcl24ZBjv8DoW5C6kaRq6Tru4K8arYZB8ZCOQAOH2a6ZAuW6wkES4eUm5QGZCk53oyZBYdAvMOSZB48opHj5aNT0Qudf3qx6DpMhJwuPUsMCMvxLlKZBx6GN1Qwj3kDZB5oETl6lLjaKJzOO7NGmgZDZD';
-const VERIFY_TOKEN = 'school_health_bot_verify'; // Create your own secret string
+// Replace these lines at the top of index.js:
+const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
+const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 
 // Clinic Information - Customize for your school
 const CLINIC_INFO = {
