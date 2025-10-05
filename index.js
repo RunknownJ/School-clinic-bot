@@ -136,7 +136,6 @@ app.post('/webhook', (req, res) => {
   }
 });
 
-// Handle incoming messages with Gemini AI
 async function handleMessage(senderId, message) {
   const text = message.text?.trim() || '';
   if (!text) return;
@@ -147,32 +146,26 @@ async function handleMessage(senderId, message) {
     // Send typing indicator
     sendTypingIndicator(senderId, true);
 
+    console.log('User message:', text);
+
+    // Check if Gemini is configured
+    if (!GEMINI_API_KEY) {
+      throw new Error('GEMINI_API_KEY not configured');
+    }
+
     // Get response from Gemini
     const geminiResponse = await getGeminiResponse(text, session);
     
-    // Parse Gemini response
-    let parsedResponse;
-    try {
-      parsedResponse = JSON.parse(geminiResponse);
-    } catch (e) {
-      // If JSON parsing fails, use fallback
-      parsedResponse = {
-        intent: 'unknown',
-        language: detectLanguageFallback(text),
-        response: geminiResponse,
-        confidence: 0.5
-      };
-    }
-
-    const { intent, language, response, confidence } = parsedResponse;
+    console.log('Gemini response:', geminiResponse);
+    
+    // Detect language from user input
+    const lang = detectLanguageFallback(text);
     
     // Update session
-    session.lastIntent = intent;
-    session.lastLang = language;
+    session.lastLang = lang;
     session.conversationHistory.push({
       user: text,
-      bot: response,
-      intent: intent,
+      bot: geminiResponse,
       timestamp: Date.now()
     });
 
@@ -181,21 +174,20 @@ async function handleMessage(senderId, message) {
       session.conversationHistory = session.conversationHistory.slice(-5);
     }
 
-    console.log(`Intent: ${intent}, Confidence: ${confidence}, Language: ${language}`);
-
     // Send typing indicator off
     sendTypingIndicator(senderId, false);
 
     // Send response
-    sendTextMessage(senderId, response);
+    sendTextMessage(senderId, geminiResponse);
 
-    // Send follow-up menu based on intent
+    // Send follow-up menu
     setTimeout(() => {
-      sendContextualMenu(senderId, intent, language);
+      sendMainMenu(senderId, lang);
     }, 1500);
 
   } catch (error) {
-    console.error('Error handling message:', error);
+    console.error('❌ ERROR:', error.message);
+    
     sendTypingIndicator(senderId, false);
     
     const errorMsg = session.lastLang === 'tl' 
@@ -203,33 +195,59 @@ async function handleMessage(senderId, message) {
       : '⚠️ Sorry, I encountered an error. Please try again.';
     
     sendTextMessage(senderId, errorMsg);
-    setTimeout(() => sendMainMenu(senderId, session.lastLang), 1000);
+    setTimeout(() => sendMainMenu(senderId, session.lastLang || 'en'), 1000);
   }
 }
 
-// Get response from Gemini AI
 async function getGeminiResponse(userMessage, session) {
-  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  try {
+    // Use gemini-pro which is stable and available
+    const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
 
-  // Build conversation context
-  let conversationContext = '';
-  if (session.conversationHistory.length > 0) {
-    conversationContext = '\n\nRECENT CONVERSATION:\n';
-    session.conversationHistory.forEach(exchange => {
-      conversationContext += `User: ${exchange.user}\nAssistant: ${exchange.bot}\n`;
-    });
+    // Build conversation context
+    let conversationContext = '';
+    if (session.conversationHistory.length > 0) {
+      conversationContext = '\n\nRECENT CONVERSATION:\n';
+      session.conversationHistory.slice(-3).forEach(exchange => {
+        conversationContext += `User: ${exchange.user}\nAssistant: ${exchange.bot}\n`;
+      });
+    }
+
+    const prompt = `You are a helpful assistant for Saint Joseph College Clinic.
+
+CLINIC INFORMATION:
+- Dentist Schedule: Monday-Friday 8:30-11:30 AM (10 slots) & 1:30-4:30 PM (10 slots), Saturday 8:00-11:30 AM
+- Doctor Schedule: Tuesday, Wednesday, Thursday 9:00 AM - 12:00 NN
+- Hospital Referral: Dongon Hospital
+- Available Medicines: Paracetamol, Dycolsen, Dycolgen, Loperamide, Erceflora, Antacid
+- Medicine Limit: Maximum 2 medicines per person with valid prescription
+- Parental Consent: Required for minors before dispensing medicine
+- Medical Certificates: Issued for valid medical reasons (school excuse, fever, asthma attacks)
+- All Services: FREE for enrolled students
+- Anesthesia: FREE during tooth extraction
+
+IMPORTANT POLICIES:
+1. Dentist appointments required (walk-ins accepted if slots available)
+2. For tooth extraction, referral slip given same day
+3. Students can visit for first aid/basic care even outside doctor's schedule
+4. For emergencies, go directly to hospital or come to clinic
+5. Refusal slips given when clinic cannot accommodate
+
+${conversationContext}
+
+User: ${userMessage}
+
+Respond in 2-4 sentences. If the user uses Tagalog words (like "ano", "kelan", "gamot", "po"), respond in Tagalog. Otherwise respond in English. Be helpful, friendly, and use emojis appropriately. Base your answer ONLY on the clinic information above.`;
+
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const text = response.text();
+
+    return text;
+  } catch (error) {
+    console.error('Gemini API Error:', error.message);
+    throw error;
   }
-
-  const prompt = `${SYSTEM_PROMPT}${conversationContext}\n\nUser: ${userMessage}\n\nProvide your response as JSON with intent, language, response, and confidence.`;
-
-  const result = await model.generateContent(prompt);
-  const response = await result.response;
-  let text = response.text();
-
-  // Clean up response (remove markdown code blocks if present)
-  text = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-
-  return text;
 }
 
 // Fallback language detection
