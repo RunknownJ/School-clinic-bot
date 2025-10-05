@@ -202,8 +202,7 @@ async function handleMessage(senderId, message) {
 async function getGeminiResponse(userMessage, session) {
   try {
     // Use gemini-pro which is stable and available
-   const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-
+const model = genAI.getGenerativeModel({ model: 'models/gemini-2.5-flash' });
     // Build conversation context
     let conversationContext = '';
     if (session.conversationHistory.length > 0) {
