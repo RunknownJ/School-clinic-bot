@@ -444,6 +444,32 @@ app.get('/test-gemini', async (req, res) => {
   }
 });
 
+// Add this endpoint to check available models
+app.get('/test-models', async (req, res) => {
+  try {
+    const response = await axios.get(
+      'https://generativelanguage.googleapis.com/v1beta/models',
+      {
+        params: { key: GEMINI_API_KEY }
+      }
+    );
+    
+    const modelNames = response.data.models
+      .filter(m => m.supportedGenerationMethods.includes('generateContent'))
+      .map(m => m.name);
+    
+    res.json({
+      success: true,
+      availableModels: modelNames
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
