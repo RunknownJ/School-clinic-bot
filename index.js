@@ -62,9 +62,15 @@ app.post('/webhook', (req, res) => {
 function handleMessage(senderId, message) {
   const text = message.text?.toLowerCase() || '';
 
-  // Check for greetings
-  if (text.match(/\b(hi|hello|hey|kumusta|kamusta|magandang|start|ola|good morning|good afternoon)\b/)) {
+  // Check for greetings (must be early to catch simple "hi")
+  if (text.match(/\b(hi|hello|hey|kumusta|kamusta|magandang|start|ola|good morning|good afternoon)\b/) && 
+      text.length < 50) {
     sendWelcomeMessage(senderId);
+  }
+  // Medical certificate (check early before other patterns)
+  else if (text.includes('certificate') || text.includes('medcert') || text.includes('med cert') ||
+           text.match(/\b(excuse|excuse letter|medical cert)\b/)) {
+    sendMedicalCertificateInfo(senderId);
   }
   // Dentist-related questions
   else if (text.match(/\b(dentist|ngipin|tooth|teeth|bungi|dental|extraction|tanggal|bunot)\b/)) {
@@ -83,16 +89,12 @@ function handleMessage(senderId, message) {
     sendDoctorSchedule(senderId);
   }
   // Sick outside doctor schedule
-  else if (text.match(/\b(sick|sakit|may sakit|outside|wala|walang doctor)\b/) && text.match(/\b(schedule|doctor|doktor)\b/)) {
+  else if (text.match(/\b(sick|sakit|may sakit)\b/) && text.match(/\b(outside|wala|walang|schedule|doctor|doktor)\b/)) {
     sendSickOutsideSchedule(senderId);
   }
   // Referral questions
   else if (text.match(/\b(referral|refer|hospital|dongon|pa.?hospital)\b/)) {
     sendReferralInfo(senderId);
-  }
-  // Medical certificate
-  else if (text.match(/\b(medical certificate|med cert|cert|certificate|excuse|excuse letter)\b/)) {
-    sendMedicalCertificateInfo(senderId);
   }
   // Medicine questions
   else if (text.match(/\b(medicine|gamot|meds|medication|paracetamol|biogesic)\b/)) {
