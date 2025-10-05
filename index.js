@@ -58,129 +58,155 @@ app.post('/webhook', (req, res) => {
   }
 });
 
+// Detect if user is speaking Tagalog
+function isTagalog(text) {
+  const tagalogWords = [
+    'kumusta', 'kamusta', 'ako', 'ikaw', 'siya', 'kami', 'tayo', 'kayo', 'sila',
+    'ang', 'ng', 'mga', 'sa', 'ay', 'ko', 'mo', 'niya', 'natin', 'namin',
+    'kelan', 'kailan', 'saan', 'ano', 'sino', 'paano', 'bakit',
+    'oo', 'hindi', 'wala', 'may', 'meron', 'kailangan', 'gusto', 'pwede',
+    'magkano', 'libre', 'bayad', 'araw', 'oras', 'bukas', 'ngayon',
+    'ngipin', 'gamot', 'sakit', 'doktor', 'ospital', 'clinic', 'klinika',
+    'magandang', 'umaga', 'hapon', 'gabi', 'salamat', 'pasensya',
+    'po', 'pumunta', 'humingi', 'nakumpirma', 'maitutulong', 'tanong',
+    'bunot', 'pamanhid', 'magulang', 'pahintulot', 'estudyante'
+  ];
+  
+  const lowerText = text.toLowerCase();
+  return tagalogWords.some(word => lowerText.includes(word));
+}
+
 // Handle incoming messages
 function handleMessage(senderId, message) {
   const text = message.text?.toLowerCase() || '';
+  const lang = isTagalog(text) ? 'tl' : 'en';
 
   // Check for greetings (must be early to catch simple "hi")
   if (text.match(/\b(hi|hello|hey|kumusta|kamusta|magandang|start|ola|good morning|good afternoon)\b/) && 
       text.length < 50) {
-    sendWelcomeMessage(senderId);
+    sendWelcomeMessage(senderId, lang);
   }
   // Medical certificate (check early before other patterns)
   else if (text.includes('certificate') || text.includes('medcert') || text.includes('med cert') ||
            text.match(/\b(excuse|excuse letter|medical cert)\b/)) {
-    sendMedicalCertificateInfo(senderId);
+    sendMedicalCertificateInfo(senderId, lang);
   }
   // Dentist-related questions
   else if (text.match(/\b(dentist|ngipin|tooth|teeth|bungi|dental|extraction|tanggal|bunot)\b/)) {
     if (text.match(/\b(schedule|available|open|kelan|kailan|oras|time|sked)\b/)) {
-      sendDentistSchedule(senderId);
+      sendDentistSchedule(senderId, lang);
     } else if (text.match(/\b(appointment|book|mag.?book|kailangan|need|pa.?appointment)\b/)) {
-      sendDentistAppointment(senderId);
+      sendDentistAppointment(senderId, lang);
     } else if (text.match(/\b(anesthesia|pamanhid|injection|free|bayad|libre)\b/)) {
-      sendAnesthesiaInfo(senderId);
+      sendAnesthesiaInfo(senderId, lang);
     } else {
-      sendDentistSchedule(senderId);
+      sendDentistSchedule(senderId, lang);
     }
   }
   // Doctor-related questions
   else if (text.match(/\b(doctor|doktor|physician|md)\b/)) {
-    sendDoctorSchedule(senderId);
+    sendDoctorSchedule(senderId, lang);
   }
   // Sick outside doctor schedule
   else if (text.match(/\b(sick|sakit|may sakit)\b/) && text.match(/\b(outside|wala|walang|schedule|doctor|doktor)\b/)) {
-    sendSickOutsideSchedule(senderId);
+    sendSickOutsideSchedule(senderId, lang);
   }
   // Referral questions
   else if (text.match(/\b(referral|refer|hospital|dongon|pa.?hospital)\b/)) {
-    sendReferralInfo(senderId);
+    sendReferralInfo(senderId, lang);
   }
   // Medicine questions
   else if (text.match(/\b(medicine|gamot|meds|medication|paracetamol|biogesic)\b/)) {
     if (text.match(/\b(limit|max|gaano|how much|how many|ilan)\b/)) {
-      sendMedicineLimit(senderId);
+      sendMedicineLimit(senderId, lang);
     } else if (text.match(/\b(parent|consent|permission|magulang|pahintulot)\b/)) {
-      sendParentalConsent(senderId);
+      sendParentalConsent(senderId, lang);
     } else if (text.match(/\b(wala|walang|not available|out of stock)\b/)) {
-      sendMedicineNotAvailable(senderId);
+      sendMedicineNotAvailable(senderId, lang);
     } else {
-      sendAvailableMedicines(senderId);
+      sendAvailableMedicines(senderId, lang);
     }
   }
   // Refusal slip
   else if (text.match(/\b(cannot accommodate|refusal|full|puno|walang slot)\b/)) {
-    sendRefusalSlipInfo(senderId);
+    sendRefusalSlipInfo(senderId, lang);
   }
   // Services
   else if (text.match(/\b(services|first aid|service|ano|what|serbisyo|tulong)\b/)) {
-    sendClinicServices(senderId);
+    sendClinicServices(senderId, lang);
   }
   // Payment/Free
   else if (text.match(/\b(pay|payment|bayad|free|libre|magkano|how much|price)\b/)) {
-    sendPaymentInfo(senderId);
+    sendPaymentInfo(senderId, lang);
   }
   // Show main menu for clinic-related but unclear queries
   else if (text.match(/\b(clinic|klinika|health|kalusugan)\b/)) {
-    sendMainMenu(senderId);
+    sendMainMenu(senderId, lang);
   }
   // Non-clinic related questions
   else {
-    sendOffTopicResponse(senderId);
+    sendOffTopicResponse(senderId, lang);
   }
 }
 
 // Handle button postbacks
 function handlePostback(senderId, postback) {
   const payload = postback.payload;
+  // Default to English for postbacks since we can't detect language from button clicks
+  const lang = 'en';
 
   switch(payload) {
     case 'DENTIST':
-      sendDentistSchedule(senderId);
+      sendDentistSchedule(senderId, lang);
       break;
     case 'DOCTOR':
-      sendDoctorSchedule(senderId);
+      sendDoctorSchedule(senderId, lang);
       break;
     case 'MEDICINES':
-      sendAvailableMedicines(senderId);
+      sendAvailableMedicines(senderId, lang);
       break;
     case 'REFERRAL':
-      sendReferralInfo(senderId);
+      sendReferralInfo(senderId, lang);
       break;
     case 'CERTIFICATE':
-      sendMedicalCertificateInfo(senderId);
+      sendMedicalCertificateInfo(senderId, lang);
       break;
     case 'SERVICES':
-      sendClinicServices(senderId);
+      sendClinicServices(senderId, lang);
       break;
     default:
-      sendMainMenu(senderId);
+      sendMainMenu(senderId, lang);
   }
 }
 
 // Welcome message
-function sendWelcomeMessage(senderId) {
+function sendWelcomeMessage(senderId, lang = 'en') {
+  const messages = {
+    en: `👋 Welcome to ${CLINIC_INFO.name} Clinic!\n\nI can help you with:\n\n🦷 Dentist schedule\n👨‍⚕️ Doctor schedule\n💊 Available medicines\n📋 Medical certificates\n🏥 Hospital referrals\n\nHow can I help you?`,
+    tl: `👋 Kumusta! Maligayang pagdating sa ${CLINIC_INFO.name} Clinic!\n\nMaaari kong tulungan kayo sa:\n\n🦷 Schedule ng dentist\n👨‍⚕️ Schedule ng doktor\n💊 Available na gamot\n📋 Medical certificate\n🏥 Hospital referral\n\nAno ang maitutulong ko sa inyo?`
+  };
+  
   const response = {
-    text: `👋 Kumusta! Welcome to ${CLINIC_INFO.name} Clinic!\n\nMaaari kong tulungan kayo sa:\n\n🦷 Dentist schedule\n👨‍⚕️ Doctor schedule\n💊 Available medicines\n📋 Medical certificates\n🏥 Hospital referrals\n\nAno ang maitutulong ko sa inyo? / How can I help you?`,
+    text: messages[lang],
     quick_replies: [
       {
         content_type: "text",
-        title: "🦷 Dentist",
+        title: lang === 'en' ? "🦷 Dentist" : "🦷 Dentista",
         payload: "DENTIST"
       },
       {
         content_type: "text",
-        title: "👨‍⚕️ Doctor",
+        title: lang === 'en' ? "👨‍⚕️ Doctor" : "👨‍⚕️ Doktor",
         payload: "DOCTOR"
       },
       {
         content_type: "text",
-        title: "💊 Medicines",
+        title: lang === 'en' ? "💊 Medicines" : "💊 Gamot",
         payload: "MEDICINES"
       },
       {
         content_type: "text",
-        title: "🏥 Services",
+        title: lang === 'en' ? "🏥 Services" : "🏥 Serbisyo",
         payload: "SERVICES"
       }
     ]
@@ -189,27 +215,32 @@ function sendWelcomeMessage(senderId) {
 }
 
 // Main menu
-function sendMainMenu(senderId) {
+function sendMainMenu(senderId, lang = 'en') {
+  const messages = {
+    en: "What do you need to know?",
+    tl: "Ano ang kailangan ninyong malaman?"
+  };
+  
   const response = {
     attachment: {
       type: "template",
       payload: {
         template_type: "button",
-        text: "Ano ang kailangan ninyong malaman? / What do you need to know?",
+        text: messages[lang],
         buttons: [
           {
             type: "postback",
-            title: "🦷 Dentist Schedule",
+            title: lang === 'en' ? "🦷 Dentist Schedule" : "🦷 Schedule ng Dentista",
             payload: "DENTIST"
           },
           {
             type: "postback",
-            title: "👨‍⚕️ Doctor Schedule",
+            title: lang === 'en' ? "👨‍⚕️ Doctor Schedule" : "👨‍⚕️ Schedule ng Doktor",
             payload: "DOCTOR"
           },
           {
             type: "postback",
-            title: "💊 Medicines",
+            title: lang === 'en' ? "💊 Medicines" : "💊 Gamot",
             payload: "MEDICINES"
           }
         ]
@@ -220,181 +251,169 @@ function sendMainMenu(senderId) {
 }
 
 // Dentist schedule
-function sendDentistSchedule(senderId) {
-  const message = `🦷 *Dentist Schedule*\n\n` +
-    `The dentist is available every day:\n\n` +
-    `📅 ${CLINIC_INFO.dentist.weekdays}\n` +
-    `📅 ${CLINIC_INFO.dentist.saturday}\n\n` +
-    `*Available ang dentist araw-araw!*`;
+function sendDentistSchedule(senderId, lang = 'en') {
+  const messages = {
+    en: `🦷 *Dentist Schedule*\n\nThe dentist is available every day:\n\n📅 ${CLINIC_INFO.dentist.weekdays}\n📅 ${CLINIC_INFO.dentist.saturday}`,
+    tl: `🦷 *Schedule ng Dentista*\n\nAvailable ang dentista araw-araw:\n\n📅 ${CLINIC_INFO.dentist.weekdays}\n📅 ${CLINIC_INFO.dentist.saturday}`
+  };
   
-  sendTextMessage(senderId, message);
-  setTimeout(() => sendMainMenu(senderId), 1500);
+  sendTextMessage(senderId, messages[lang]);
+  setTimeout(() => sendMainMenu(senderId, lang), 1500);
 }
 
 // Dentist appointment
-function sendDentistAppointment(senderId) {
-  const message = `📝 *Dentist Appointment*\n\n` +
-    `✅ Yes, you need an appointment to see the dentist.\n\n` +
-    `*For tooth extraction:* You will get your referral slip on the same day of your scheduled extraction.\n\n` +
-    `*Oo, kailangan ng appointment. Kung magpabunot ng ngipin, makukuha ang referral slip sa araw mismo ng extraction.*`;
+function sendDentistAppointment(senderId, lang = 'en') {
+  const messages = {
+    en: `📝 *Dentist Appointment*\n\nYes, you need an appointment to see the dentist.\n\n*For tooth extraction:* You will get your referral slip on the same day of your scheduled extraction.`,
+    tl: `📝 *Appointment sa Dentista*\n\nOo, kailangan ng appointment para makita ang dentista.\n\n*Para sa pagbunot ng ngipin:* Makukuha ninyo ang referral slip sa araw mismo ng inyong scheduled extraction.`
+  };
   
-  sendTextMessage(senderId, message);
-  setTimeout(() => sendMainMenu(senderId), 1500);
+  sendTextMessage(senderId, messages[lang]);
+  setTimeout(() => sendMainMenu(senderId, lang), 1500);
 }
 
 // Anesthesia info
-function sendAnesthesiaInfo(senderId) {
-  const message = `💉 *Anesthesia Information*\n\n` +
-    `✅ Yes, anesthesia is FREE of charge during tooth removal.\n\n` +
-    `*Libre ang pamanhid (anesthesia) kapag nagpabunot ng ngipin!*`;
+function sendAnesthesiaInfo(senderId, lang = 'en') {
+  const messages = {
+    en: `💉 *Anesthesia Information*\n\nYes, anesthesia is FREE of charge during tooth removal.`,
+    tl: `💉 *Impormasyon sa Anesthesia*\n\nOo, LIBRE ang anesthesia (pamanhid) kapag nagpabunot ng ngipin.`
+  };
   
-  sendTextMessage(senderId, message);
-  setTimeout(() => sendMainMenu(senderId), 1500);
+  sendTextMessage(senderId, messages[lang]);
+  setTimeout(() => sendMainMenu(senderId, lang), 1500);
 }
 
 // Doctor schedule
-function sendDoctorSchedule(senderId) {
-  const message = `👨‍⚕️ *Doctor Schedule*\n\n` +
-    `The doctor is available:\n` +
-    `📅 ${CLINIC_INFO.doctor.schedule}\n\n` +
-    `*Available ang doctor tuwing Tuesday, Wednesday, at Thursday morning lang.*`;
+function sendDoctorSchedule(senderId, lang = 'en') {
+  const messages = {
+    en: `👨‍⚕️ *Doctor Schedule*\n\nThe doctor is available:\n📅 ${CLINIC_INFO.doctor.schedule}`,
+    tl: `👨‍⚕️ *Schedule ng Doktor*\n\nAvailable ang doktor:\n📅 ${CLINIC_INFO.doctor.schedule}`
+  };
   
-  sendTextMessage(senderId, message);
-  setTimeout(() => sendMainMenu(senderId), 1500);
+  sendTextMessage(senderId, messages[lang]);
+  setTimeout(() => sendMainMenu(senderId, lang), 1500);
 }
 
 // Sick outside doctor schedule
-function sendSickOutsideSchedule(senderId) {
-  const message = `🏥 *Sick Outside Doctor's Schedule?*\n\n` +
-    `Don't worry! You may still come to the clinic for:\n` +
-    `✅ Basic care\n` +
-    `✅ First aid\n\n` +
-    `For serious cases, we will refer you to ${CLINIC_INFO.hospital}.\n\n` +
-    `*Pwede pa rin kayong pumunta sa clinic para sa basic care. Kung seryoso, ire-refer kayo sa Dongon Hospital.*`;
+function sendSickOutsideSchedule(senderId, lang = 'en') {
+  const messages = {
+    en: `🏥 *Sick Outside Doctor's Schedule?*\n\nDon't worry! You may still come to the clinic for:\n✅ Basic care\n✅ First aid\n\nFor serious cases, we will refer you to ${CLINIC_INFO.hospital}.`,
+    tl: `🏥 *May Sakit Kahit Wala ang Doktor?*\n\nWalang problema! Pwede pa rin kayong pumunta sa clinic para sa:\n✅ Basic care\n✅ First aid\n\nKung seryoso ang kaso, ire-refer namin kayo sa ${CLINIC_INFO.hospital}.`
+  };
   
-  sendTextMessage(senderId, message);
-  setTimeout(() => sendMainMenu(senderId), 1500);
+  sendTextMessage(senderId, messages[lang]);
+  setTimeout(() => sendMainMenu(senderId, lang), 1500);
 }
 
 // Referral information
-function sendReferralInfo(senderId) {
-  const message = `🏥 *Hospital Referral*\n\n` +
-    `✅ Yes, you can request a referral slip if you want to be treated in a hospital like ${CLINIC_INFO.hospital}.\n\n` +
-    `*For emergencies:* You can go directly to the hospital.\n` +
-    `*For regular treatment:* Visit the school clinic first and request a referral.\n\n` +
-    `*Pwede kayong humingi ng referral slip kung gusto ninyong magpatingin sa hospital. Pero sa emergency, diretso na sa hospital!*`;
+function sendReferralInfo(senderId, lang = 'en') {
+  const messages = {
+    en: `🏥 *Hospital Referral*\n\nYes, you can request a referral slip if you want to be treated in a hospital like ${CLINIC_INFO.hospital}.\n\n*For emergencies:* You can go directly to the hospital.\n*For regular treatment:* Visit the school clinic first and request a referral.`,
+    tl: `🏥 *Referral sa Hospital*\n\nOo, pwede kayong humingi ng referral slip kung gusto ninyong magpatingin sa hospital tulad ng ${CLINIC_INFO.hospital}.\n\n*Para sa emergency:* Diretso na kayo sa hospital.\n*Para sa regular treatment:* Pumunta muna sa school clinic at humingi ng referral.`
+  };
   
-  sendTextMessage(senderId, message);
-  setTimeout(() => sendMainMenu(senderId), 1500);
+  sendTextMessage(senderId, messages[lang]);
+  setTimeout(() => sendMainMenu(senderId, lang), 1500);
 }
 
 // Medical certificate
-function sendMedicalCertificateInfo(senderId) {
-  const message = `📋 *Medical Certificate*\n\n` +
-    `✅ Yes, we issue medical certificates if you:\n\n` +
-    `• Need an excuse from school activities\n` +
-    `• Miss class due to fever or asthma attacks\n\n` +
-    `*Note:* Certificates are only issued for valid medical reasons confirmed by the clinic staff.\n\n` +
-    `*Naglalabas kami ng medical certificate para sa valid medical reasons na nakumpirma ng clinic.*`;
+function sendMedicalCertificateInfo(senderId, lang = 'en') {
+  const messages = {
+    en: `📋 *Medical Certificate*\n\nYes, we issue medical certificates if you:\n\n• Need an excuse from school activities\n• Miss class due to fever or asthma attacks\n\n*Note:* Certificates are only issued for valid medical reasons confirmed by the clinic staff.`,
+    tl: `📋 *Medical Certificate*\n\nOo, naglalabas kami ng medical certificate kung:\n\n• Kailangan ng excuse sa school activities\n• Hindi pumasok dahil sa lagnat o asthma attack\n\n*Tandaan:* Ang certificate ay para lang sa valid medical reasons na nakumpirma ng clinic staff.`
+  };
   
-  sendTextMessage(senderId, message);
-  setTimeout(() => sendMainMenu(senderId), 1500);
+  sendTextMessage(senderId, messages[lang]);
+  setTimeout(() => sendMainMenu(senderId, lang), 1500);
 }
 
 // Available medicines
-function sendAvailableMedicines(senderId) {
+function sendAvailableMedicines(senderId, lang = 'en') {
   const medicineList = CLINIC_INFO.medicines.join('\n• ');
-  const message = `💊 *Available Medicines*\n\n` +
-    `We provide the following medicines:\n\n• ${medicineList}\n\n` +
-    `*Ito ang mga gamot na available sa clinic.*`;
+  const messages = {
+    en: `💊 *Available Medicines*\n\nWe provide the following medicines:\n\n• ${medicineList}`,
+    tl: `💊 *Available na Gamot*\n\nAng mga sumusunod na gamot ay available sa clinic:\n\n• ${medicineList}`
+  };
   
-  sendTextMessage(senderId, message);
-  setTimeout(() => sendMainMenu(senderId), 1500);
+  sendTextMessage(senderId, messages[lang]);
+  setTimeout(() => sendMainMenu(senderId, lang), 1500);
 }
 
 // Medicine limit
-function sendMedicineLimit(senderId) {
-  const message = `💊 *Medicine Limit*\n\n` +
-    `Maximum of 2 medicines per person if there's a valid prescription.\n\n` +
-    `*Maximum 2 gamot lang per tao kung may valid prescription.*`;
+function sendMedicineLimit(senderId, lang = 'en') {
+  const messages = {
+    en: `💊 *Medicine Limit*\n\nMaximum of 2 medicines per person if there's a valid prescription.`,
+    tl: `💊 *Limitasyon sa Gamot*\n\nMaximum 2 gamot lang per tao kung may valid prescription.`
+  };
   
-  sendTextMessage(senderId, message);
-  setTimeout(() => sendMainMenu(senderId), 1500);
+  sendTextMessage(senderId, messages[lang]);
+  setTimeout(() => sendMainMenu(senderId, lang), 1500);
 }
 
 // Parental consent
-function sendParentalConsent(senderId) {
-  const message = `👨‍👩‍👧 *Parental Consent Required*\n\n` +
-    `We need parental permission before giving medicines.\n\n` +
-    `We also check for allergies first to ensure safety.\n\n` +
-    `*Kailangan ng pahintulot ng magulang bago magbigay ng gamot. Chinecheck din namin kung may allergy.*`;
+function sendParentalConsent(senderId, lang = 'en') {
+  const messages = {
+    en: `👨‍👩‍👧 *Parental Consent Required*\n\nWe need parental permission before giving medicines.\n\nWe also check for allergies first to ensure safety.`,
+    tl: `👨‍👩‍👧 *Kailangan ng Pahintulot ng Magulang*\n\nKailangan namin ng pahintulot ng magulang bago magbigay ng gamot.\n\nChinecheck din namin kung may allergy para sigurado.`
+  };
   
-  sendTextMessage(senderId, message);
-  setTimeout(() => sendMainMenu(senderId), 1500);
+  sendTextMessage(senderId, messages[lang]);
+  setTimeout(() => sendMainMenu(senderId, lang), 1500);
 }
 
 // Medicine not available
-function sendMedicineNotAvailable(senderId) {
-  const message = `💊 *Medicine Not Available*\n\n` +
-    `If we don't have the medicine you need, you will be referred to the nearest pharmacy or hospital for complete medication.\n\n` +
-    `*Kung wala kaming gamot na kailangan ninyo, ire-refer kayo sa pharmacy o hospital.*`;
+function sendMedicineNotAvailable(senderId, lang = 'en') {
+  const messages = {
+    en: `💊 *Medicine Not Available*\n\nIf we don't have the medicine you need, you will be referred to the nearest pharmacy or hospital for complete medication.`,
+    tl: `💊 *Walang Available na Gamot*\n\nKung wala kaming gamot na kailangan ninyo, ire-refer namin kayo sa pinakamalapit na pharmacy o hospital.`
+  };
   
-  sendTextMessage(senderId, message);
-  setTimeout(() => sendMainMenu(senderId), 1500);
+  sendTextMessage(senderId, messages[lang]);
+  setTimeout(() => sendMainMenu(senderId, lang), 1500);
 }
 
 // Refusal slip
-function sendRefusalSlipInfo(senderId) {
-  const message = `📄 *Refusal Slip*\n\n` +
-    `If the clinic cannot accommodate you, you will be given a refusal slip so you can seek treatment outside.\n\n` +
-    `*Kung hindi kayo ma-accommodate sa clinic, bibigyan kayo ng refusal slip para makapagpagamot sa labas.*`;
+function sendRefusalSlipInfo(senderId, lang = 'en') {
+  const messages = {
+    en: `📄 *Refusal Slip*\n\nIf the clinic cannot accommodate you, you will be given a refusal slip so you can seek treatment outside.`,
+    tl: `📄 *Refusal Slip*\n\nKung hindi kayo ma-accommodate sa clinic, bibigyan namin kayo ng refusal slip para makapagpagamot sa labas.`
+  };
   
-  sendTextMessage(senderId, message);
-  setTimeout(() => sendMainMenu(senderId), 1500);
+  sendTextMessage(senderId, messages[lang]);
+  setTimeout(() => sendMainMenu(senderId, lang), 1500);
 }
 
 // Clinic services
-function sendClinicServices(senderId) {
-  const message = `🏥 *Clinic Services*\n\n` +
-    `We provide:\n\n` +
-    `✅ First aid\n` +
-    `✅ Basic medicines\n` +
-    `✅ Health monitoring\n` +
-    `✅ Medical certificates\n` +
-    `✅ Referrals to specialists or hospitals\n` +
-    `✅ Dental services\n` +
-    `✅ Doctor consultation\n\n` +
-    `*Nag-aalok kami ng first aid, gamot, medical certificate, at referral sa hospital kung kailangan.*`;
+function sendClinicServices(senderId, lang = 'en') {
+  const messages = {
+    en: `🏥 *Clinic Services*\n\nWe provide:\n\n✅ First aid\n✅ Basic medicines\n✅ Health monitoring\n✅ Medical certificates\n✅ Referrals to specialists or hospitals\n✅ Dental services\n✅ Doctor consultation`,
+    tl: `🏥 *Mga Serbisyo ng Clinic*\n\nNag-aalok kami ng:\n\n✅ First aid\n✅ Basic na gamot\n✅ Health monitoring\n✅ Medical certificate\n✅ Referral sa specialist o hospital\n✅ Dental services\n✅ Konsultasyon sa doktor`
+  };
   
-  sendTextMessage(senderId, message);
-  setTimeout(() => sendMainMenu(senderId), 1500);
+  sendTextMessage(senderId, messages[lang]);
+  setTimeout(() => sendMainMenu(senderId, lang), 1500);
 }
 
 // Payment information
-function sendPaymentInfo(senderId) {
-  const message = `💰 *Payment Information*\n\n` +
-    `✅ Basic services and common medicines are FREE for students.\n\n` +
-    `No payment required! 🎉\n\n` +
-    `*LIBRE ang basic services at common medicines para sa mga estudyante!*`;
+function sendPaymentInfo(senderId, lang = 'en') {
+  const messages = {
+    en: `💰 *Payment Information*\n\nBasic services and common medicines are FREE for students.\n\nNo payment required! 🎉`,
+    tl: `💰 *Impormasyon sa Bayad*\n\nLIBRE ang basic services at common medicines para sa mga estudyante.\n\nWalang bayad! 🎉`
+  };
   
-  sendTextMessage(senderId, message);
-  setTimeout(() => sendMainMenu(senderId), 1500);
+  sendTextMessage(senderId, messages[lang]);
+  setTimeout(() => sendMainMenu(senderId, lang), 1500);
 }
 
 // Off-topic response
-function sendOffTopicResponse(senderId) {
-  const message = `⚠️ I'm sorry, but I can only answer questions related to the ${CLINIC_INFO.name} Clinic.\n\n` +
-    `Please ask about:\n` +
-    `• Dentist schedule\n` +
-    `• Doctor schedule\n` +
-    `• Medicines\n` +
-    `• Medical certificates\n` +
-    `• Hospital referrals\n` +
-    `• Clinic services\n\n` +
-    `*Pasensya na, pero tanong lang po tungkol sa clinic ang masasagot ko. Salamat!*`;
+function sendOffTopicResponse(senderId, lang = 'en') {
+  const messages = {
+    en: `⚠️ I'm sorry, but I can only answer questions related to the ${CLINIC_INFO.name} Clinic.\n\nPlease ask about:\n• Dentist schedule\n• Doctor schedule\n• Medicines\n• Medical certificates\n• Hospital referrals\n• Clinic services`,
+    tl: `⚠️ Pasensya na, pero tanong lang po tungkol sa ${CLINIC_INFO.name} Clinic ang masasagot ko.\n\nPaki-tanong lang tungkol sa:\n• Schedule ng dentista\n• Schedule ng doktor\n• Gamot\n• Medical certificate\n• Hospital referral\n• Mga serbisyo ng clinic`
+  };
   
-  sendTextMessage(senderId, message);
-  setTimeout(() => sendMainMenu(senderId), 1000);
+  sendTextMessage(senderId, messages[lang]);
+  setTimeout(() => sendMainMenu(senderId, lang), 1000);
 }
 
 // Send text message
