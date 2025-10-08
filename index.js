@@ -21,13 +21,17 @@ const CLINIC_INFO = {
   dentist: {
     weekdays: 'Mon-Fri: 8:30-11:30 AM (10 slots) & 1:30-4:30 PM (10 slots)',
     saturday: 'Sat: 8:00-11:30 AM (half-day)',
-    sunday: 'Not available'
+    sunday: 'Not available',
+    extraction_process: 'Get referral from Main Campus clinic → Go to Junior High School dental office for tooth extraction'
   },
   doctor: {
     schedule: 'Tuesday, Wednesday, Thursday: 9:00 AM - 12:00 NN'
   },
   hospital: 'Dongon Hospital',
-  medicines: ['Paracetamol', 'Dycolsen', 'Dycolgen', 'Loperamide', 'Erceflora', 'Antacid']
+  medicines: {
+    available: ['Paracetamol', 'Dycolsen', 'Dycolgen', 'Loperamide', 'Erceflora', 'Antacid'],
+    note: 'Over-the-counter medicines, no prescription required'
+  }
 };
 
 // System prompt for Gemini AI
