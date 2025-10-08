@@ -41,8 +41,8 @@ CLINIC INFORMATION:
 - Dentist Schedule: Monday-Friday 8:30-11:30 AM (10 slots) & 1:30-4:30 PM (10 slots), Saturday 8:00-11:30 AM
 - Doctor Schedule: Tuesday, Wednesday, Thursday 9:00 AM - 12:00 NN
 - Hospital Referral: Dongon Hospital
-- Available Medicines: Paracetamol, Dycolsen, Dycolgen, Loperamide, Erceflora, Antacid
-- Medicine Limit: Maximum 2 medicines per person with valid prescription
+- Available Medicines: Paracetamol, Dycolsen, Dycolgen, Loperamide, Erceflora, Antacid (all over-the-counter, no prescription required)
+- Medicine Limit: Maximum 2 medicines per person
 - Parental Consent: Required for minors before dispensing medicine
 - Medical Certificates: Issued for valid medical reasons (school excuse, fever, asthma attacks)
 - All Services: FREE for enrolled students
@@ -50,7 +50,7 @@ CLINIC INFORMATION:
 
 KEY POLICIES:
 1. Dentist appointments are required (walk-ins accepted if slots available)
-2. For tooth extraction, referral slip given same day as scheduled extraction
+2. For tooth extraction: Get referral from Main Campus clinic → Go to Junior High School dental office for the extraction
 3. Students can visit clinic for first aid/basic care even outside doctor's schedule
 4. For emergencies, students can go directly to hospital or come to clinic for assessment
 5. Refusal slips given when clinic cannot accommodate (full slots, requires specialized care, etc.)
@@ -58,10 +58,15 @@ KEY POLICIES:
 RESPONSE GUIDELINES:
 - Be concise and clear (2-4 sentences maximum unless complex question)
 - Use emojis appropriately for warmth
-- Detect language (English or Tagalog) and respond in same language
+- Detect language (English, Tagalog, or Bisaya/Cebuano) and respond in same language
 - If question is outside clinic scope, politely redirect
 - Always be helpful and empathetic
 - Provide specific information based on the facts above
+
+LANGUAGE DETECTION:
+- English: Common words like "what", "when", "how", "can", "is"
+- Tagalog: Words like "ano", "kelan", "paano", "po", "salamat", "gamot"
+- Bisaya/Cebuano: Words like "unsa", "kanus-a", "unsaon", "asa", "naa", "tambal", "ngipon", "doktor"
 
 INTENT CLASSIFICATION:
 Classify user intent as one of: greeting, dentist_schedule, dentist_appointment, dentist_extraction, anesthesia, doctor_schedule, sick_no_doctor, emergency, medical_certificate, referral, medicines, medicine_limit, parental_consent, medicine_unavailable, refusal_slip, services, payment, thanks, help, off_topic
@@ -69,7 +74,7 @@ Classify user intent as one of: greeting, dentist_schedule, dentist_appointment,
 Format your response as JSON:
 {
   "intent": "intent_name",
-  "language": "en" or "tl",
+  "language": "en" or "tl" or "ceb",
   "response": "your helpful response here",
   "confidence": 0.0-1.0
 }`;
@@ -196,6 +201,8 @@ async function handleMessage(senderId, message) {
     
     const errorMsg = session.lastLang === 'tl' 
       ? '⚠️ Pasensya na, may problema sa sistema. Pakisubukan ulit.'
+      : session.lastLang === 'ceb'
+      ? '⚠️ Pasensya na, naa problema sa sistema. Palihug suway-i usab.'
       : '⚠️ Sorry, I encountered an error. Please try again.';
     
     sendTextMessage(senderId, errorMsg);
@@ -205,8 +212,9 @@ async function handleMessage(senderId, message) {
 
 async function getGeminiResponse(userMessage, session) {
   try {
-    // Use gemini-pro which is stable and available
-const model = genAI.getGenerativeModel({ model: 'models/gemini-2.5-flash' });
+    // Use gemini-2.5-flash which is stable and available
+    const model = genAI.getGenerativeModel({ model: 'models/gemini-2.5-flash' });
+    
     // Build conversation context
     let conversationContext = '';
     if (session.conversationHistory.length > 0) {
@@ -222,8 +230,8 @@ CLINIC INFORMATION:
 - Dentist Schedule: Monday-Friday 8:30-11:30 AM (10 slots) & 1:30-4:30 PM (10 slots), Saturday 8:00-11:30 AM
 - Doctor Schedule: Tuesday, Wednesday, Thursday 9:00 AM - 12:00 NN
 - Hospital Referral: Dongon Hospital
-- Available Medicines: Paracetamol, Dycolsen, Dycolgen, Loperamide, Erceflora, Antacid
-- Medicine Limit: Maximum 2 medicines per person with valid prescription
+- Available Medicines: Paracetamol, Dycolsen, Dycolgen, Loperamide, Erceflora, Antacid (all over-the-counter, no prescription required)
+- Medicine Limit: Maximum 2 medicines per person
 - Parental Consent: Required for minors before dispensing medicine
 - Medical Certificates: Issued for valid medical reasons (school excuse, fever, asthma attacks)
 - All Services: FREE for enrolled students
@@ -231,7 +239,7 @@ CLINIC INFORMATION:
 
 IMPORTANT POLICIES:
 1. Dentist appointments required (walk-ins accepted if slots available)
-2. For tooth extraction, referral slip given same day
+2. TOOTH EXTRACTION PROCESS: Students must get a referral from the Main Campus clinic first, then go to the Junior High School dental office for the actual tooth extraction
 3. Students can visit for first aid/basic care even outside doctor's schedule
 4. For emergencies, go directly to hospital or come to clinic
 5. Refusal slips given when clinic cannot accommodate
@@ -240,7 +248,11 @@ ${conversationContext}
 
 User: ${userMessage}
 
-Respond in 2-4 sentences. If the user uses Tagalog words (like "ano", "kelan", "gamot", "po"), respond in Tagalog. Otherwise respond in English. Be helpful, friendly, and use emojis appropriately. Base your answer ONLY on the clinic information above.`;
+Respond in 2-4 sentences. Detect the language:
+- If user uses Bisaya/Cebuano words (like "unsa", "kanus-a", "unsaon", "asa", "naa", "tambal", "ngipon"), respond in Bisaya/Cebuano
+- If user uses Tagalog words (like "ano", "kelan", "gamot", "po"), respond in Tagalog
+- Otherwise respond in English
+Be helpful, friendly, and use emojis appropriately. Base your answer ONLY on the clinic information above.`;
 
     const result = await model.generateContent(prompt);
     const response = await result.response;
@@ -255,11 +267,25 @@ Respond in 2-4 sentences. If the user uses Tagalog words (like "ano", "kelan", "
 
 // Fallback language detection
 function detectLanguageFallback(text) {
-  const tagalogWords = ['kumusta', 'ako', 'ang', 'ng', 'sa', 'po', 'opo', 'salamat', 
-                        'ano', 'kelan', 'kailan', 'paano', 'gamot', 'sakit', 'ngipin'];
   const lowerText = text.toLowerCase();
+  
+  // Bisaya/Cebuano words
+  const bisayaWords = ['unsa', 'kanus-a', 'kanusa', 'unsaon', 'asa', 'naa', 'wala', 
+                       'tambal', 'ngipon', 'doktor', 'dentista', 'maayo', 'salamat kaayo',
+                       'kumusta', 'pila', 'libre', 'bayad', 'kinsa', 'ngano'];
+  
+  // Tagalog words
+  const tagalogWords = ['kumusta', 'ako', 'ang', 'ng', 'sa', 'po', 'opo', 'salamat', 
+                        'ano', 'kelan', 'kailan', 'paano', 'gamot', 'sakit', 'ngipin',
+                        'magkano', 'libre', 'bayad', 'sino'];
+  
+  const bisayaCount = bisayaWords.filter(word => lowerText.includes(word)).length;
   const tagalogCount = tagalogWords.filter(word => lowerText.includes(word)).length;
-  return tagalogCount >= 2 ? 'tl' : 'en';
+  
+  // Bisaya takes priority if detected
+  if (bisayaCount >= 1) return 'ceb';
+  if (tagalogCount >= 2) return 'tl';
+  return 'en';
 }
 
 // Handle postbacks
@@ -284,17 +310,33 @@ function handlePostback(senderId, postback) {
   
   // Create a message as if user asked about this topic
   const messageMap = {
-    'DENTIST': lang === 'en' ? 'Tell me about dentist schedule' : 'Ano ang schedule ng dentista',
-    'DOCTOR': lang === 'en' ? 'Tell me about doctor schedule' : 'Ano ang schedule ng doktor',
-    'MEDICINES': lang === 'en' ? 'What medicines are available?' : 'Anong gamot ang available?',
-    'REFERRAL': lang === 'en' ? 'Tell me about hospital referral' : 'Paano ang hospital referral',
-    'CERTIFICATE': lang === 'en' ? 'How do I get a medical certificate?' : 'Paano makakuha ng medical certificate?',
-    'SERVICES': lang === 'en' ? 'What services does the clinic offer?' : 'Anong serbisyo ang inaalok ng clinic?',
-    'EMERGENCY': lang === 'en' ? 'What should I do in an emergency?' : 'Ano gagawin sa emergency?',
-    'PAYMENT': lang === 'en' ? 'Do I need to pay for services?' : 'May bayad ba ang mga serbisyo?'
+    'DENTIST': lang === 'en' ? 'Tell me about dentist schedule' : 
+               lang === 'tl' ? 'Ano ang schedule ng dentista' : 
+               'Unsa ang schedule sa dentista',
+    'DOCTOR': lang === 'en' ? 'Tell me about doctor schedule' : 
+              lang === 'tl' ? 'Ano ang schedule ng doktor' : 
+              'Unsa ang schedule sa doktor',
+    'MEDICINES': lang === 'en' ? 'What medicines are available?' : 
+                 lang === 'tl' ? 'Anong gamot ang available?' : 
+                 'Unsa nga tambal ang available?',
+    'REFERRAL': lang === 'en' ? 'Tell me about hospital referral' : 
+                lang === 'tl' ? 'Paano ang hospital referral' : 
+                'Unsaon ang hospital referral',
+    'CERTIFICATE': lang === 'en' ? 'How do I get a medical certificate?' : 
+                   lang === 'tl' ? 'Paano makakuha ng medical certificate?' : 
+                   'Unsaon pagkuha ug medical certificate?',
+    'SERVICES': lang === 'en' ? 'What services does the clinic offer?' : 
+                lang === 'tl' ? 'Anong serbisyo ang inaalok ng clinic?' : 
+                'Unsa nga serbisyo ang gi-offer sa clinic?',
+    'EMERGENCY': lang === 'en' ? 'What should I do in an emergency?' : 
+                 lang === 'tl' ? 'Ano gagawin sa emergency?' : 
+                 'Unsa akong buhaton sa emergency?',
+    'PAYMENT': lang === 'en' ? 'Do I need to pay for services?' : 
+               lang === 'tl' ? 'May bayad ba ang mga serbisyo?' : 
+               'Naa bay bayad sa mga serbisyo?'
   };
 
-  const simulatedMessage = { text: messageMap[payload] || (lang === 'en' ? 'Help' : 'Tulong') };
+  const simulatedMessage = { text: messageMap[payload] || (lang === 'en' ? 'Help' : lang === 'tl' ? 'Tulong' : 'Tabang') };
   handleMessage(senderId, simulatedMessage);
 }
 
@@ -309,27 +351,31 @@ function sendContextualMenu(senderId, intent, lang = 'en') {
     dentist_schedule: {
       en: ['🦷 Book Appointment', '💉 Anesthesia Info', '💊 Medicines'],
       tl: ['🦷 Mag-book', '💉 Anesthesia', '💊 Gamot'],
+      ceb: ['🦷 Mag-book', '💉 Anesthesia', '💊 Tambal'],
       payloads: ['DENTIST_APPOINTMENT', 'ANESTHESIA', 'MEDICINES']
     },
     doctor_schedule: {
       en: ['📋 Med Certificate', '🏥 Referral', '🚨 Emergency'],
       tl: ['📋 Certificate', '🏥 Referral', '🚨 Emergency'],
+      ceb: ['📋 Certificate', '🏥 Referral', '🚨 Emergency'],
       payloads: ['CERTIFICATE', 'REFERRAL', 'EMERGENCY']
     },
     medicines: {
       en: ['👨‍👩‍👧 Parental Consent', '🦷 Dentist', '👨‍⚕️ Doctor'],
       tl: ['👨‍👩‍👧 Pahintulot', '🦷 Dentista', '👨‍⚕️ Doktor'],
+      ceb: ['👨‍👩‍👧 Pagtugot', '🦷 Dentista', '👨‍⚕️ Doktor'],
       payloads: ['PARENTAL_CONSENT', 'DENTIST', 'DOCTOR']
     },
     default: {
       en: ['🦷 Dentist', '👨‍⚕️ Doctor', '💊 Medicines', '🏥 Services'],
       tl: ['🦷 Dentista', '👨‍⚕️ Doktor', '💊 Gamot', '🏥 Serbisyo'],
+      ceb: ['🦷 Dentista', '👨‍⚕️ Doktor', '💊 Tambal', '🏥 Serbisyo'],
       payloads: ['DENTIST', 'DOCTOR', 'MEDICINES', 'SERVICES']
     }
   };
 
   const menu = menus[intent] || menus.default;
-  const titles = menu[lang];
+  const titles = menu[lang] || menu['en'];
   const payloads = menu.payloads;
 
   const quickReplies = titles.slice(0, 4).map((title, index) => ({
@@ -338,8 +384,14 @@ function sendContextualMenu(senderId, intent, lang = 'en') {
     payload: payloads[index]
   }));
 
+  const followUpText = {
+    en: "Need help with anything else?",
+    tl: "May iba pa ba kayong kailangan?",
+    ceb: "Naa pa bay lain nga imong kinahanglan?"
+  };
+
   const message = {
-    text: lang === 'en' ? "Need help with anything else?" : "May iba pa ba kayong kailangan?",
+    text: followUpText[lang] || followUpText.en,
     quick_replies: quickReplies
   };
 
@@ -350,29 +402,50 @@ function sendContextualMenu(senderId, intent, lang = 'en') {
 function sendMainMenu(senderId, lang = 'en') {
   const messages = {
     en: "How can I help you?",
-    tl: "Paano kita matutulungan?"
+    tl: "Paano kita matutulungan?",
+    ceb: "Unsaon nako pagtabang nimo?"
   };
+  
+  const buttonLabels = {
+    en: {
+      dentist: "🦷 Dentist Info",
+      doctor: "👨‍⚕️ Doctor Info",
+      medicines: "💊 Medicines"
+    },
+    tl: {
+      dentist: "🦷 Info ng Dentista",
+      doctor: "👨‍⚕️ Info ng Doktor",
+      medicines: "💊 Gamot"
+    },
+    ceb: {
+      dentist: "🦷 Info sa Dentista",
+      doctor: "👨‍⚕️ Info sa Doktor",
+      medicines: "💊 Tambal"
+    }
+  };
+  
+  const labels = buttonLabels[lang] || buttonLabels.en;
   
   const response = {
     attachment: {
       type: "template",
       payload: {
         template_type: "button",
-        text: messages[lang],
+        text: messages[lang] || messages.en,
         buttons: [
           {
             type: "postback",
-            title: lang === 'en' ? "🦷 Dentist Info" : "🦷 Info ng Dentista",
+            title: labels.dentist,
             payload: "DENTIST"
           },
           {
             type: "postback",
-            title: lang === 'en' ? "👨‍⚕️ Doctor Info" : "👨‍⚕️ Info ng Doktor",
+            title: labels.doctor,
             payload: "DOCTOR"
           },
           {
             type: "postback",
-            title: lang === 'en' ? "💊 Medicines" : "💊 Gamot",
+            title: labels.medicines,
             payload: "MEDICINES"
           }
         ]
