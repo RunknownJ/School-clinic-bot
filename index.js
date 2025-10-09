@@ -17,67 +17,50 @@ const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
 // Saint Joseph College Clinic Information
 const CLINIC_INFO = {
-  name: 'Saint Joseph College',
+  location: {
+    main: 'Ground Floor beside the Theology Office',
+    dental: 'Junior High School Department, near the medical clinic'
+  },
+  hours: {
+    weekdays: 'Monday–Friday: 8:00 AM – 5:00 PM',
+    saturday: 'Saturday: 8:00 AM – 12:00 NN (half-day)',
+    sunday: 'Closed on Sundays and holidays'
+  },
   dentist: {
-    weekdays: 'Mon-Fri: 8:30-11:30 AM (10 slots) & 1:30-4:30 PM (10 slots)',
-    saturday: 'Sat: 8:00-11:30 AM (half-day)',
-    sunday: 'Not available',
-    extraction_process: 'Get referral from Main Campus clinic → Go to Junior High School dental office for tooth extraction'
+    schedule: 'Mon-Fri: 8:30-11:30 AM & 1:30-4:30 PM (10 slots per session), Sat: 8:00-11:30 AM',
+    extraction_process: 'Get referral from Main Campus clinic → Go to Junior High School dental office for tooth extraction',
+    anesthesia: 'FREE during tooth extraction'
   },
   doctor: {
-    schedule: 'Tuesday, Wednesday, Thursday: 9:00 AM - 12:00 NN'
+    schedule: 'Tuesday, Wednesday, Thursday: 9:00 AM - 12:00 NN',
+    outside_hours: 'Students can visit for basic care and first aid. Serious cases will receive referral slips.'
   },
-  hospital: 'Dongon Hospital',
   medicines: {
     available: ['Paracetamol', 'Dycolsen', 'Dycolgen', 'Loperamide', 'Erceflora', 'Antacid'],
-    note: 'Over-the-counter medicines, no prescription required'
+    limit: 'Maximum 2 medicines per person',
+    type: 'Over-the-counter medicines, no prescription required',
+    parental_consent: 'Required for minors before dispensing medicine',
+    prescription: 'Prescription medicines require valid doctor prescription'
+  },
+  certificates: {
+    issued_for: ['School excuse', 'Fever', 'Asthma attacks', 'Other verified illness'],
+    requirement: 'Valid medical reasons confirmed by clinic staff'
+  },
+  referral: {
+    hospital: 'Dongon Hospital',
+    emergency: 'Can go directly to hospital',
+    regular: 'Visit clinic first for proper documentation',
+    refusal_slip: 'Given when clinic cannot accommodate'
+  },
+  services: {
+    all_free: 'All basic services and common medicines are FREE for enrolled students',
+    includes: ['First aid treatment', 'Chronic condition monitoring', 'Hospital referrals', 'Health counseling', 'Preventive care tips']
+  },
+  emergency: {
+    procedure: 'Inform teacher/staff → Escorted to clinic → First aid → Hospital referral if needed',
+    handles: ['Injuries', 'Fainting', 'Fever', 'Asthma attacks', 'Other urgent conditions']
   }
 };
-
-// System prompt for Gemini AI
-const SYSTEM_PROMPT = `You are a helpful virtual assistant for Saint Joseph College School Clinic. Your role is to provide accurate information about clinic services in a friendly and professional manner.
-
-CLINIC INFORMATION:
-- Dentist Schedule: Monday-Friday 8:30-11:30 AM (10 slots) & 1:30-4:30 PM (10 slots), Saturday 8:00-11:30 AM
-- Doctor Schedule: Tuesday, Wednesday, Thursday 9:00 AM - 12:00 NN
-- Hospital Referral: Dongon Hospital
-- Available Medicines: Paracetamol, Dycolsen, Dycolgen, Loperamide, Erceflora, Antacid (all over-the-counter, no prescription required)
-- Medicine Limit: Maximum 2 medicines per person
-- Parental Consent: Required for minors before dispensing medicine
-- Medical Certificates: Issued for valid medical reasons (school excuse, fever, asthma attacks)
-- All Services: FREE for enrolled students
-- Anesthesia: FREE during tooth extraction
-
-KEY POLICIES:
-1. Dentist appointments are required (walk-ins accepted if slots available)
-2. For tooth extraction: Get referral from Main Campus clinic → Go to Junior High School dental office for the extraction
-3. Students can visit clinic for first aid/basic care even outside doctor's schedule
-4. For emergencies, students can go directly to hospital or come to clinic for assessment
-5. Refusal slips given when clinic cannot accommodate (full slots, requires specialized care, etc.)
-
-RESPONSE GUIDELINES:
-- Be concise and clear (2-4 sentences maximum unless complex question)
-- Use emojis appropriately for warmth
-- Detect language (English, Tagalog, or Bisaya/Cebuano) and respond in same language
-- If question is outside clinic scope, politely redirect
-- Always be helpful and empathetic
-- Provide specific information based on the facts above
-
-LANGUAGE DETECTION:
-- English: Common words like "what", "when", "how", "can", "is"
-- Tagalog: Words like "ano", "kelan", "paano", "po", "salamat", "gamot"
-- Bisaya/Cebuano: Words like "unsa", "kanus-a", "unsaon", "asa", "naa", "tambal", "ngipon", "doktor"
-
-INTENT CLASSIFICATION:
-Classify user intent as one of: greeting, dentist_schedule, dentist_appointment, dentist_extraction, anesthesia, doctor_schedule, sick_no_doctor, emergency, medical_certificate, referral, medicines, medicine_limit, parental_consent, medicine_unavailable, refusal_slip, services, payment, thanks, help, off_topic
-
-Format your response as JSON:
-{
-  "intent": "intent_name",
-  "language": "en" or "tl" or "ceb",
-  "response": "your helpful response here",
-  "confidence": 0.0-1.0
-}`;
 
 // User session management
 const userSessions = new Map();
@@ -89,7 +72,8 @@ function getUserSession(userId) {
       lastIntent: null,
       lastLang: 'en',
       conversationCount: 0,
-      lastInteraction: Date.now()
+      lastInteraction: Date.now(),
+      menuLevel: 'main'
     });
   }
   
@@ -100,7 +84,7 @@ function getUserSession(userId) {
   return session;
 }
 
-// Clean up old sessions
+// Clean up old sessions (30 minutes)
 setInterval(() => {
   const now = Date.now();
   for (const [userId, session] of userSessions.entries()) {
@@ -152,25 +136,17 @@ async function handleMessage(senderId, message) {
   const session = getUserSession(senderId);
 
   try {
-    // Send typing indicator
     sendTypingIndicator(senderId, true);
-
     console.log('User message:', text);
 
-    // Check if Gemini is configured
     if (!GEMINI_API_KEY) {
       throw new Error('GEMINI_API_KEY not configured');
     }
 
-    // Get response from Gemini
     const geminiResponse = await getGeminiResponse(text, session);
-    
     console.log('Gemini response:', geminiResponse);
     
-    // Detect language from user input
     const lang = detectLanguageFallback(text);
-    
-    // Update session
     session.lastLang = lang;
     session.conversationHistory.push({
       user: text,
@@ -178,25 +154,19 @@ async function handleMessage(senderId, message) {
       timestamp: Date.now()
     });
 
-    // Keep only last 5 exchanges
     if (session.conversationHistory.length > 5) {
       session.conversationHistory = session.conversationHistory.slice(-5);
     }
 
-    // Send typing indicator off
     sendTypingIndicator(senderId, false);
-
-    // Send response
     sendTextMessage(senderId, geminiResponse);
 
-    // Send follow-up menu
     setTimeout(() => {
       sendMainMenu(senderId, lang);
     }, 1500);
 
   } catch (error) {
     console.error('❌ ERROR:', error.message);
-    
     sendTypingIndicator(senderId, false);
     
     const errorMsg = session.lastLang === 'tl' 
@@ -212,10 +182,8 @@ async function handleMessage(senderId, message) {
 
 async function getGeminiResponse(userMessage, session) {
   try {
-    // Use gemini-2.5-flash which is stable and available
     const model = genAI.getGenerativeModel({ model: 'models/gemini-2.5-flash' });
     
-    // Build conversation context
     let conversationContext = '';
     if (session.conversationHistory.length > 0) {
       conversationContext = '\n\nRECENT CONVERSATION:\n';
@@ -227,22 +195,60 @@ async function getGeminiResponse(userMessage, session) {
     const prompt = `You are a helpful assistant for Saint Joseph College Clinic.
 
 CLINIC INFORMATION:
-- Dentist Schedule: Monday-Friday 8:30-11:30 AM (10 slots) & 1:30-4:30 PM (10 slots), Saturday 8:00-11:30 AM
-- Doctor Schedule: Tuesday, Wednesday, Thursday 9:00 AM - 12:00 NN
-- Hospital Referral: Dongon Hospital
-- Available Medicines: Paracetamol, Dycolsen, Dycolgen, Loperamide, Erceflora, Antacid (all over-the-counter, no prescription required)
-- Medicine Limit: Maximum 2 medicines per person
-- Parental Consent: Required for minors before dispensing medicine
-- Medical Certificates: Issued for valid medical reasons (school excuse, fever, asthma attacks)
-- All Services: FREE for enrolled students
-- Anesthesia: FREE during tooth extraction
 
-IMPORTANT POLICIES:
-1. Dentist appointments required (walk-ins accepted if slots available)
-2. TOOTH EXTRACTION PROCESS: Students must get a referral from the Main Campus clinic first, then go to the Junior High School dental office for the actual tooth extraction
-3. Students can visit for first aid/basic care even outside doctor's schedule
-4. For emergencies, go directly to hospital or come to clinic
-5. Refusal slips given when clinic cannot accommodate
+LOCATION:
+- Main Campus Clinic: Ground Floor beside the Theology Office
+- Dental Clinic: Junior High School Department, near the medical clinic
+
+OPERATING HOURS:
+- Monday–Friday: 8:00 AM – 5:00 PM
+- Saturday: 8:00 AM – 12:00 NN (half-day)
+- Closed on Sundays and holidays
+
+DENTIST SCHEDULE:
+- Monday–Friday: 8:30–11:30 AM and 1:30–4:30 PM (10 extraction slots per session)
+- Saturday: 8:00–11:30 AM (half-day)
+- Anesthesia is FREE during tooth extraction
+
+DOCTOR SCHEDULE:
+- Tuesday, Wednesday, Thursday: 9:00 AM – 12:00 NN
+- Outside doctor's hours: Students can still visit for basic care and first aid
+- Serious cases receive referral slips to hospitals
+
+TOOTH EXTRACTION PROCESS:
+1. Go to Main Campus Clinic first
+2. Get referral slip (issued same day)
+3. Go to Dentist's Clinic at Junior High School Department
+4. Bring referral slip for same-day extraction (subject to slot availability)
+5. Follow post-care instructions after extraction
+6. Parental consent required for minors
+
+AVAILABLE MEDICINES (Over-the-counter, no prescription needed):
+- Paracetamol, Dycolsen, Dycolgen, Loperamide, Erceflora, Antacid
+- Limit: Maximum 2 medicines per person
+- Parental consent required for minors
+- Prescription medicines require valid doctor's prescription
+
+MEDICAL CERTIFICATES:
+- Issued for: School excuse, fever, asthma attacks, other verified illness
+- Requirement: Valid medical reasons confirmed by clinic staff
+
+HOSPITAL REFERRALS:
+- Referral hospital: Dongon Hospital
+- Emergency: Can go directly to hospital
+- Regular treatment: Visit clinic first for documentation
+- Refusal slip given when clinic cannot accommodate
+
+EMERGENCY PROCEDURES:
+- Inform teacher/staff → Escorted to clinic → First aid → Hospital referral if needed
+- Handles: Injuries, fainting, fever, asthma attacks, other urgent conditions
+
+OTHER SERVICES (ALL FREE for enrolled students):
+- First aid treatment
+- Chronic condition monitoring
+- Hospital referrals
+- Health counseling
+- Preventive care tips
 
 ${conversationContext}
 
@@ -256,9 +262,7 @@ Be helpful, friendly, and use emojis appropriately. Base your answer ONLY on the
 
     const result = await model.generateContent(prompt);
     const response = await result.response;
-    const text = response.text();
-
-    return text;
+    return response.text();
   } catch (error) {
     console.error('Gemini API Error:', error.message);
     throw error;
@@ -269,12 +273,10 @@ Be helpful, friendly, and use emojis appropriately. Base your answer ONLY on the
 function detectLanguageFallback(text) {
   const lowerText = text.toLowerCase();
   
-  // Bisaya/Cebuano words
   const bisayaWords = ['unsa', 'kanus-a', 'kanusa', 'unsaon', 'asa', 'naa', 'wala', 
                        'tambal', 'ngipon', 'doktor', 'dentista', 'maayo', 'salamat kaayo',
                        'kumusta', 'pila', 'libre', 'bayad', 'kinsa', 'ngano'];
   
-  // Tagalog words
   const tagalogWords = ['kumusta', 'ako', 'ang', 'ng', 'sa', 'po', 'opo', 'salamat', 
                         'ano', 'kelan', 'kailan', 'paano', 'gamot', 'sakit', 'ngipin',
                         'magkano', 'libre', 'bayad', 'sino'];
@@ -282,7 +284,6 @@ function detectLanguageFallback(text) {
   const bisayaCount = bisayaWords.filter(word => lowerText.includes(word)).length;
   const tagalogCount = tagalogWords.filter(word => lowerText.includes(word)).length;
   
-  // Bisaya takes priority if detected
   if (bisayaCount >= 1) return 'ceb';
   if (tagalogCount >= 2) return 'tl';
   return 'en';
@@ -294,165 +295,145 @@ function handlePostback(senderId, postback) {
   const session = getUserSession(senderId);
   const lang = session.lastLang || 'en';
 
-  // Map payload to intent for Gemini context
-  const intentMap = {
-    'DENTIST': 'dentist_schedule',
-    'DOCTOR': 'doctor_schedule',
-    'MEDICINES': 'medicines',
-    'REFERRAL': 'referral',
-    'CERTIFICATE': 'medical_certificate',
-    'SERVICES': 'services',
-    'EMERGENCY': 'emergency',
-    'PAYMENT': 'payment'
-  };
+  console.log('Postback payload:', payload);
 
-  const intent = intentMap[payload] || 'help';
-  
-  // Create a message as if user asked about this topic
-  const messageMap = {
-    'DENTIST': lang === 'en' ? 'Tell me about dentist schedule' : 
-               lang === 'tl' ? 'Ano ang schedule ng dentista' : 
-               'Unsa ang schedule sa dentista',
-    'DOCTOR': lang === 'en' ? 'Tell me about doctor schedule' : 
-              lang === 'tl' ? 'Ano ang schedule ng doktor' : 
-              'Unsa ang schedule sa doktor',
-    'MEDICINES': lang === 'en' ? 'What medicines are available?' : 
-                 lang === 'tl' ? 'Anong gamot ang available?' : 
-                 'Unsa nga tambal ang available?',
-    'REFERRAL': lang === 'en' ? 'Tell me about hospital referral' : 
-                lang === 'tl' ? 'Paano ang hospital referral' : 
-                'Unsaon ang hospital referral',
-    'CERTIFICATE': lang === 'en' ? 'How do I get a medical certificate?' : 
-                   lang === 'tl' ? 'Paano makakuha ng medical certificate?' : 
-                   'Unsaon pagkuha ug medical certificate?',
-    'SERVICES': lang === 'en' ? 'What services does the clinic offer?' : 
-                lang === 'tl' ? 'Anong serbisyo ang inaalok ng clinic?' : 
-                'Unsa nga serbisyo ang gi-offer sa clinic?',
-    'EMERGENCY': lang === 'en' ? 'What should I do in an emergency?' : 
-                 lang === 'tl' ? 'Ano gagawin sa emergency?' : 
-                 'Unsa akong buhaton sa emergency?',
-    'PAYMENT': lang === 'en' ? 'Do I need to pay for services?' : 
-               lang === 'tl' ? 'May bayad ba ang mga serbisyo?' : 
-               'Naa bay bayad sa mga serbisyo?'
-  };
-
-  const simulatedMessage = { text: messageMap[payload] || (lang === 'en' ? 'Help' : lang === 'tl' ? 'Tulong' : 'Tabang') };
-  handleMessage(senderId, simulatedMessage);
-}
-
-// Send contextual menu based on intent
-function sendContextualMenu(senderId, intent, lang = 'en') {
-  // Don't send menu after thanks or off_topic
-  if (['thanks', 'off_topic'].includes(intent)) {
+  // Handle back to main menu
+  if (payload === 'MAIN_MENU') {
+    session.menuLevel = 'main';
+    sendMainMenu(senderId, lang);
     return;
   }
 
-  const menus = {
-    dentist_schedule: {
-      en: ['🦷 Book Appointment', '💉 Anesthesia Info', '💊 Medicines'],
-      tl: ['🦷 Mag-book', '💉 Anesthesia', '💊 Gamot'],
-      ceb: ['🦷 Mag-book', '💉 Anesthesia', '💊 Tambal'],
-      payloads: ['DENTIST_APPOINTMENT', 'ANESTHESIA', 'MEDICINES']
+  // Create appropriate message based on payload
+  const messageMap = {
+    'CLINIC_INFO': {
+      en: 'Tell me about clinic location and hours',
+      tl: 'Sabihin sa akin ang lokasyon at oras ng clinic',
+      ceb: 'Sultihi ko ang lokasyon ug oras sa clinic'
     },
-    doctor_schedule: {
-      en: ['📋 Med Certificate', '🏥 Referral', '🚨 Emergency'],
-      tl: ['📋 Certificate', '🏥 Referral', '🚨 Emergency'],
-      ceb: ['📋 Certificate', '🏥 Referral', '🚨 Emergency'],
-      payloads: ['CERTIFICATE', 'REFERRAL', 'EMERGENCY']
+    'DOCTOR_SCHEDULE': {
+      en: 'When is the doctor available?',
+      tl: 'Kailan available ang doktor?',
+      ceb: 'Kanus-a available ang doktor?'
     },
-    medicines: {
-      en: ['👨‍👩‍👧 Parental Consent', '🦷 Dentist', '👨‍⚕️ Doctor'],
-      tl: ['👨‍👩‍👧 Pahintulot', '🦷 Dentista', '👨‍⚕️ Doktor'],
-      ceb: ['👨‍👩‍👧 Pagtugot', '🦷 Dentista', '👨‍⚕️ Doktor'],
-      payloads: ['PARENTAL_CONSENT', 'DENTIST', 'DOCTOR']
+    'DENTAL_SERVICES': {
+      en: 'Tell me about dental services',
+      tl: 'Sabihin ang tungkol sa dental services',
+      ceb: 'Sultihi ko ang bahin sa dental services'
     },
-    default: {
-      en: ['🦷 Dentist', '👨‍⚕️ Doctor', '💊 Medicines', '🏥 Services'],
-      tl: ['🦷 Dentista', '👨‍⚕️ Doktor', '💊 Gamot', '🏥 Serbisyo'],
-      ceb: ['🦷 Dentista', '👨‍⚕️ Doktor', '💊 Tambal', '🏥 Serbisyo'],
-      payloads: ['DENTIST', 'DOCTOR', 'MEDICINES', 'SERVICES']
+    'MEDICINES': {
+      en: 'What medicines are available?',
+      tl: 'Anong gamot ang available?',
+      ceb: 'Unsa nga tambal ang available?'
+    },
+    'CERTIFICATES': {
+      en: 'How do I get a medical certificate?',
+      tl: 'Paano makakuha ng medical certificate?',
+      ceb: 'Unsaon pagkuha ug medical certificate?'
+    },
+    'REFERRALS': {
+      en: 'Tell me about hospital referrals',
+      tl: 'Sabihin ang tungkol sa hospital referral',
+      ceb: 'Sultihi ko ang bahin sa hospital referral'
+    },
+    'EMERGENCY': {
+      en: 'What should I do in an emergency?',
+      tl: 'Ano gagawin sa emergency?',
+      ceb: 'Unsa akong buhaton sa emergency?'
+    },
+    'OTHER_SERVICES': {
+      en: 'What other services does the clinic offer?',
+      tl: 'Anong iba pang serbisyo ng clinic?',
+      ceb: 'Unsa pa nga serbisyo sa clinic?'
+    },
+    'TOOTH_EXTRACTION': {
+      en: 'How do I get a tooth extraction?',
+      tl: 'Paano magpabunot ng ngipin?',
+      ceb: 'Unsaon pagpabunot ug ngipon?'
     }
   };
 
-  const menu = menus[intent] || menus.default;
-  const titles = menu[lang] || menu['en'];
-  const payloads = menu.payloads;
-
-  const quickReplies = titles.slice(0, 4).map((title, index) => ({
-    content_type: "text",
-    title: title,
-    payload: payloads[index]
-  }));
-
-  const followUpText = {
-    en: "Need help with anything else?",
-    tl: "May iba pa ba kayong kailangan?",
-    ceb: "Naa pa bay lain nga imong kinahanglan?"
-  };
-
-  const message = {
-    text: followUpText[lang] || followUpText.en,
-    quick_replies: quickReplies
-  };
-
-  sendMessage(senderId, message);
+  const msgObj = messageMap[payload];
+  if (msgObj) {
+    const simulatedMessage = { text: msgObj[lang] || msgObj.en };
+    handleMessage(senderId, simulatedMessage);
+  } else {
+    sendMainMenu(senderId, lang);
+  }
 }
 
 // Send main menu
 function sendMainMenu(senderId, lang = 'en') {
-  const messages = {
-    en: "How can I help you?",
-    tl: "Paano kita matutulungan?",
-    ceb: "Unsaon nako pagtabang nimo?"
+  const menuText = {
+    en: "🏥 Saint Joseph College Clinic\n\nChoose a category below:",
+    tl: "🏥 Saint Joseph College Clinic\n\nPumili ng kategorya:",
+    ceb: "🏥 Saint Joseph College Clinic\n\nPili ug kategorya:"
   };
-  
-  const buttonLabels = {
-    en: {
-      dentist: "🦷 Dentist Info",
-      doctor: "👨‍⚕️ Doctor Info",
-      medicines: "💊 Medicines"
+
+  const quickReplies = [
+    {
+      en: "📍 Clinic Info & Hours",
+      tl: "📍 Info at Oras ng Clinic",
+      ceb: "📍 Info ug Oras sa Clinic",
+      payload: "CLINIC_INFO"
     },
-    tl: {
-      dentist: "🦷 Info ng Dentista",
-      doctor: "👨‍⚕️ Info ng Doktor",
-      medicines: "💊 Gamot"
+    {
+      en: "👨‍⚕️ Doctor's Schedule",
+      tl: "👨‍⚕️ Schedule ng Doktor",
+      ceb: "👨‍⚕️ Schedule sa Doktor",
+      payload: "DOCTOR_SCHEDULE"
     },
-    ceb: {
-      dentist: "🦷 Info sa Dentista",
-      doctor: "👨‍⚕️ Info sa Doktor",
-      medicines: "💊 Tambal"
+    {
+      en: "🦷 Dental Services",
+      tl: "🦷 Dental Services",
+      ceb: "🦷 Dental Services",
+      payload: "DENTAL_SERVICES"
+    },
+    {
+      en: "💊 Medicines",
+      tl: "💊 Mga Gamot",
+      ceb: "💊 Mga Tambal",
+      payload: "MEDICINES"
+    },
+    {
+      en: "📋 Medical Certificates",
+      tl: "📋 Medical Certificate",
+      ceb: "📋 Medical Certificate",
+      payload: "CERTIFICATES"
+    },
+    {
+      en: "🏥 Referrals & Hospitals",
+      tl: "🏥 Referral at Hospital",
+      ceb: "🏥 Referral ug Hospital",
+      payload: "REFERRALS"
+    },
+    {
+      en: "🚨 Emergency & First Aid",
+      tl: "🚨 Emergency at First Aid",
+      ceb: "🚨 Emergency ug First Aid",
+      payload: "EMERGENCY"
+    },
+    {
+      en: "✨ Other Services",
+      tl: "✨ Iba Pang Serbisyo",
+      ceb: "✨ Uban Pang Serbisyo",
+      payload: "OTHER_SERVICES"
     }
+  ];
+
+  // Messenger has limit of 13 quick replies, we have 8 so we're good
+  const formattedReplies = quickReplies.map(item => ({
+    content_type: "text",
+    title: item[lang] || item.en,
+    payload: item.payload
+  }));
+
+  const message = {
+    text: menuText[lang] || menuText.en,
+    quick_replies: formattedReplies
   };
-  
-  const labels = buttonLabels[lang] || buttonLabels.en;
-  
-  const response = {
-    attachment: {
-      type: "template",
-      payload: {
-        template_type: "button",
-        text: messages[lang] || messages.en,
-        buttons: [
-          {
-            type: "postback",
-            title: labels.dentist,
-            payload: "DENTIST"
-          },
-          {
-            type: "postback",
-            title: labels.doctor,
-            payload: "DOCTOR"
-          },
-          {
-            type: "postback",
-            title: labels.medicines,
-            payload: "MEDICINES"
-          }
-        ]
-      }
-    }
-  };
-  sendMessage(senderId, response);
+
+  sendMessage(senderId, message);
 }
 
 // Send typing indicator
@@ -496,7 +477,7 @@ app.get('/', (req, res) => {
   res.send('Saint Joseph College Clinic Chatbot with Gemini AI is running! 🏥🤖');
 });
 
-// Test Gemini endpoint (for debugging)
+// Test Gemini endpoint
 app.get('/test-gemini', async (req, res) => {
   const testMessage = req.query.message || 'When is the dentist available?';
   
@@ -520,7 +501,7 @@ app.get('/test-gemini', async (req, res) => {
   }
 });
 
-// Add this endpoint to check available models
+// Check available models
 app.get('/test-models', async (req, res) => {
   try {
     const response = await axios.get(
