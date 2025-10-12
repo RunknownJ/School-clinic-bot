@@ -62,8 +62,9 @@ const CLINIC_INFO = {
   }
 };
 
-// User session management
+// User session management with admin mode support
 const userSessions = new Map();
+const ADMIN_INACTIVE_TIMEOUT = 15 * 60 * 1000; // 15 minutes
 
 function getUserSession(userId) {
   if (!userSessions.has(userId)) {
@@ -73,7 +74,10 @@ function getUserSession(userId) {
       lastLang: 'en',
       conversationCount: 0,
       lastInteraction: Date.now(),
-      menuLevel: 'main'
+      menuLevel: 'main',
+      adminMode: false,
+      lastAdminActivity: null,
+      adminInactivityTimer: null
     });
   }
   
@@ -84,11 +88,79 @@ function getUserSession(userId) {
   return session;
 }
 
+// Enable admin mode for a user
+function enableAdminMode(userId) {
+  const session = getUserSession(userId);
+  session.adminMode = true;
+  session.lastAdminActivity = Date.now();
+  
+  // Clear any existing timer
+  if (session.adminInactivityTimer) {
+    clearTimeout(session.adminInactivityTimer);
+  }
+  
+  console.log(`Admin mode ENABLED for user ${userId}`);
+}
+
+// Update admin activity timestamp
+function updateAdminActivity(userId) {
+  const session = userSessions.get(userId);
+  if (session && session.adminMode) {
+    session.lastAdminActivity = Date.now();
+    
+    // Clear existing timer
+    if (session.adminInactivityTimer) {
+      clearTimeout(session.adminInactivityTimer);
+    }
+    
+    // Set new timer for auto-disable after 15 minutes
+    session.adminInactivityTimer = setTimeout(() => {
+      disableAdminMode(userId, true);
+    }, ADMIN_INACTIVE_TIMEOUT);
+    
+    console.log(`Admin activity updated for user ${userId}`);
+  }
+}
+
+// Disable admin mode for a user
+function disableAdminMode(userId, autoDisabled = false) {
+  const session = userSessions.get(userId);
+  if (session && session.adminMode) {
+    session.adminMode = false;
+    session.lastAdminActivity = null;
+    
+    if (session.adminInactivityTimer) {
+      clearTimeout(session.adminInactivityTimer);
+      session.adminInactivityTimer = null;
+    }
+    
+    console.log(`Admin mode DISABLED for user ${userId} ${autoDisabled ? '(auto)' : '(manual)'}`);
+    
+    // Notify user that chatbot is back
+    if (autoDisabled) {
+      const lang = session.lastLang || 'en';
+      const reactivationMsg = {
+        en: "🤖 The chatbot is now active again! Feel free to ask me questions about the clinic, or type 'talk to admin' if you need to speak with a staff member.",
+        tl: "🤖 Ang chatbot ay aktibo na ulit! Magtanong ka tungkol sa clinic, o i-type ang 'talk to admin' kung kailangan mo ng staff.",
+        ceb: "🤖 Ang chatbot aktibo na usab! Pangutana ko bahin sa clinic, o i-type ang 'talk to admin' kung kinahanglan nimo ang staff."
+      };
+      
+      sendTextMessage(userId, reactivationMsg[lang] || reactivationMsg.en);
+      setTimeout(() => {
+        sendMainMenu(userId, lang);
+      }, 1000);
+    }
+  }
+}
+
 // Clean up old sessions (30 minutes)
 setInterval(() => {
   const now = Date.now();
   for (const [userId, session] of userSessions.entries()) {
     if (now - session.lastInteraction > 1800000) {
+      if (session.adminInactivityTimer) {
+        clearTimeout(session.adminInactivityTimer);
+      }
       userSessions.delete(userId);
     }
   }
@@ -135,6 +207,34 @@ async function handleMessage(senderId, message) {
 
   const session = getUserSession(senderId);
 
+  // Check if user wants to talk to admin
+  const talkToAdminKeywords = ['talk to admin', 'speak to admin', 'contact admin', 
+                                'magsalita sa admin', 'makipag-usap sa admin',
+                                'pakigsulti sa admin', 'gusto ko admin'];
+  
+  if (talkToAdminKeywords.some(keyword => text.toLowerCase().includes(keyword))) {
+    enableAdminMode(senderId);
+    
+    const adminModeMsg = {
+      en: "👨‍💼 Admin mode activated! A clinic staff member has been notified and will respond to you shortly. The chatbot is now paused.\n\n(The chatbot will automatically reactivate after 15 minutes of admin inactivity)",
+      tl: "👨‍💼 Admin mode activated! Aabisuhan ang clinic staff at sasagutin ka nila. Ang chatbot ay naka-pause na.\n\n(Ang chatbot ay babalik pagkatapos ng 15 minuto ng walang admin activity)",
+      ceb: "👨‍💼 Admin mode activated! Pahibaw-an ang clinic staff ug tubagon ka nila. Ang chatbot gi-pause na.\n\n(Ang chatbot mobalik human sa 15 minuto nga walay admin activity)"
+    };
+    
+    sendTextMessage(senderId, adminModeMsg[session.lastLang] || adminModeMsg.en);
+    
+    // Set the inactivity timer
+    updateAdminActivity(senderId);
+    return;
+  }
+
+  // If admin mode is active, just update activity and let admin handle it
+  if (session.adminMode) {
+    updateAdminActivity(senderId);
+    console.log(`Message from user ${senderId} in admin mode - chatbot paused`);
+    return; // Don't respond with chatbot
+  }
+
   try {
     sendTypingIndicator(senderId, true);
     console.log('User message:', text);
@@ -143,11 +243,13 @@ async function handleMessage(senderId, message) {
       throw new Error('GEMINI_API_KEY not configured');
     }
 
-    const geminiResponse = await getGeminiResponse(text, session);
-    console.log('Gemini response:', geminiResponse);
-    
+    // Detect language from user's typed message
     const lang = detectLanguageFallback(text);
     session.lastLang = lang;
+
+    const geminiResponse = await getGeminiResponse(text, session, lang);
+    console.log('Gemini response:', geminiResponse);
+    
     session.conversationHistory.push({
       user: text,
       bot: geminiResponse,
@@ -180,9 +282,9 @@ async function handleMessage(senderId, message) {
   }
 }
 
-async function getGeminiResponse(userMessage, session) {
+async function getGeminiResponse(userMessage, session, detectedLang) {
   try {
-    const model = genAI.getGenerativeModel({ model: 'models/gemini-2.5-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
     
     let conversationContext = '';
     if (session.conversationHistory.length > 0) {
@@ -192,7 +294,19 @@ async function getGeminiResponse(userMessage, session) {
       });
     }
 
+    // Language instruction based on detected language
+    let languageInstruction = '';
+    if (detectedLang === 'ceb') {
+      languageInstruction = 'IMPORTANT: Respond in Bisaya/Cebuano language.';
+    } else if (detectedLang === 'tl') {
+      languageInstruction = 'IMPORTANT: Respond in Tagalog language.';
+    } else {
+      languageInstruction = 'IMPORTANT: Respond in English language.';
+    }
+
     const prompt = `You are a helpful assistant for Saint Joseph College Clinic.
+
+${languageInstruction}
 
 CLINIC INFORMATION:
 
@@ -250,15 +364,16 @@ OTHER SERVICES (ALL FREE for enrolled students):
 - Health counseling
 - Preventive care tips
 
+TALKING TO ADMIN:
+- Students can type "talk to admin" or "speak to admin" to connect with clinic staff
+- When admin mode is active, chatbot pauses automatically
+- Chatbot reactivates after 15 minutes of admin inactivity
+
 ${conversationContext}
 
 User: ${userMessage}
 
-Respond in 2-4 sentences. Detect the language:
-- If user uses Bisaya/Cebuano words (like "unsa", "kanus-a", "unsaon", "asa", "naa", "tambal", "ngipon"), respond in Bisaya/Cebuano
-- If user uses Tagalog words (like "ano", "kelan", "gamot", "po"), respond in Tagalog
-- Otherwise respond in English
-Be helpful, friendly, and use emojis appropriately. Base your answer ONLY on the clinic information above.`;
+Respond in 2-4 sentences in ${detectedLang === 'ceb' ? 'Bisaya/Cebuano' : detectedLang === 'tl' ? 'Tagalog' : 'English'}. Be helpful, friendly, and use emojis appropriately. Base your answer ONLY on the clinic information above.`;
 
     const result = await model.generateContent(prompt);
     const response = await result.response;
@@ -275,11 +390,11 @@ function detectLanguageFallback(text) {
   
   const bisayaWords = ['unsa', 'kanus-a', 'kanusa', 'unsaon', 'asa', 'naa', 'wala', 
                        'tambal', 'ngipon', 'doktor', 'dentista', 'maayo', 'salamat kaayo',
-                       'kumusta', 'pila', 'libre', 'bayad', 'kinsa', 'ngano'];
+                       'kumusta', 'pila', 'libre', 'bayad', 'kinsa', 'ngano', 'diin'];
   
   const tagalogWords = ['kumusta', 'ako', 'ang', 'ng', 'sa', 'po', 'opo', 'salamat', 
                         'ano', 'kelan', 'kailan', 'paano', 'gamot', 'sakit', 'ngipin',
-                        'magkano', 'libre', 'bayad', 'sino'];
+                        'magkano', 'libre', 'bayad', 'sino', 'saan'];
   
   const bisayaCount = bisayaWords.filter(word => lowerText.includes(word)).length;
   const tagalogCount = tagalogWords.filter(word => lowerText.includes(word)).length;
@@ -293,143 +408,87 @@ function detectLanguageFallback(text) {
 function handlePostback(senderId, postback) {
   const payload = postback.payload;
   const session = getUserSession(senderId);
-  const lang = session.lastLang || 'en';
 
   console.log('Postback payload:', payload);
+
+  // If admin mode is active, update activity
+  if (session.adminMode) {
+    updateAdminActivity(senderId);
+    return; // Don't respond with chatbot in admin mode
+  }
 
   // Handle back to main menu
   if (payload === 'MAIN_MENU') {
     session.menuLevel = 'main';
-    sendMainMenu(senderId, lang);
+    sendMainMenu(senderId, 'en'); // Always English for menu
     return;
   }
 
-  // Create appropriate message based on payload
+  // Handle talk to admin
+  if (payload === 'TALK_TO_ADMIN') {
+    enableAdminMode(senderId);
+    
+    const adminModeMsg = "👨‍💼 Admin mode activated! A clinic staff member has been notified and will respond to you shortly. The chatbot is now paused.\n\n(The chatbot will automatically reactivate after 15 minutes of admin inactivity)";
+    
+    sendTextMessage(senderId, adminModeMsg);
+    updateAdminActivity(senderId);
+    return;
+  }
+
+  // Menu selections are always in English
   const messageMap = {
-    'CLINIC_INFO': {
-      en: 'Tell me about clinic location and hours',
-      tl: 'Sabihin sa akin ang lokasyon at oras ng clinic',
-      ceb: 'Sultihi ko ang lokasyon ug oras sa clinic'
-    },
-    'DOCTOR_SCHEDULE': {
-      en: 'When is the doctor available?',
-      tl: 'Kailan available ang doktor?',
-      ceb: 'Kanus-a available ang doktor?'
-    },
-    'DENTAL_SERVICES': {
-      en: 'Tell me about dental services',
-      tl: 'Sabihin ang tungkol sa dental services',
-      ceb: 'Sultihi ko ang bahin sa dental services'
-    },
-    'MEDICINES': {
-      en: 'What medicines are available?',
-      tl: 'Anong gamot ang available?',
-      ceb: 'Unsa nga tambal ang available?'
-    },
-    'CERTIFICATES': {
-      en: 'How do I get a medical certificate?',
-      tl: 'Paano makakuha ng medical certificate?',
-      ceb: 'Unsaon pagkuha ug medical certificate?'
-    },
-    'REFERRALS': {
-      en: 'Tell me about hospital referrals',
-      tl: 'Sabihin ang tungkol sa hospital referral',
-      ceb: 'Sultihi ko ang bahin sa hospital referral'
-    },
-    'EMERGENCY': {
-      en: 'What should I do in an emergency?',
-      tl: 'Ano gagawin sa emergency?',
-      ceb: 'Unsa akong buhaton sa emergency?'
-    },
-    'OTHER_SERVICES': {
-      en: 'What other services does the clinic offer?',
-      tl: 'Anong iba pang serbisyo ng clinic?',
-      ceb: 'Unsa pa nga serbisyo sa clinic?'
-    },
-    'TOOTH_EXTRACTION': {
-      en: 'How do I get a tooth extraction?',
-      tl: 'Paano magpabunot ng ngipin?',
-      ceb: 'Unsaon pagpabunot ug ngipon?'
-    }
+    'CLINIC_INFO': 'Tell me about clinic location and hours',
+    'DOCTOR_SCHEDULE': 'When is the doctor available?',
+    'DENTAL_SERVICES': 'Tell me about dental services',
+    'MEDICINES': 'What medicines are available?',
+    'CERTIFICATES': 'How do I get a medical certificate?',
+    'REFERRALS': 'Tell me about hospital referrals',
+    'EMERGENCY': 'What should I do in an emergency?',
+    'OTHER_SERVICES': 'What other services does the clinic offer?',
+    'TOOTH_EXTRACTION': 'How do I get a tooth extraction?'
   };
 
-  const msgObj = messageMap[payload];
-  if (msgObj) {
-    const simulatedMessage = { text: msgObj[lang] || msgObj.en };
-    handleMessage(senderId, simulatedMessage);
+  const simulatedMessage = messageMap[payload];
+  if (simulatedMessage) {
+    // Force English for menu selections
+    session.lastLang = 'en';
+    handleMessage(senderId, { text: simulatedMessage });
   } else {
-    sendMainMenu(senderId, lang);
+    sendMainMenu(senderId, 'en');
   }
 }
 
-// Send main menu
+// Send main menu (always in English)
 function sendMainMenu(senderId, lang = 'en') {
-  const menuText = {
-    en: "🏥 Saint Joseph College Clinic\n\nChoose a category below:",
-    tl: "🏥 Saint Joseph College Clinic\n\nPumili ng kategorya:",
-    ceb: "🏥 Saint Joseph College Clinic\n\nPili ug kategorya:"
-  };
+  const session = getUserSession(senderId);
+  
+  // Don't send menu if admin mode is active
+  if (session && session.adminMode) {
+    return;
+  }
+
+  const menuText = "🏥 Saint Joseph College Clinic\n\nChoose a category below:";
 
   const quickReplies = [
-    {
-      en: "📍 Clinic Info & Hours",
-      tl: "📍 Info at Oras ng Clinic",
-      ceb: "📍 Info ug Oras sa Clinic",
-      payload: "CLINIC_INFO"
-    },
-    {
-      en: "👨‍⚕️ Doctor's Schedule",
-      tl: "👨‍⚕️ Schedule ng Doktor",
-      ceb: "👨‍⚕️ Schedule sa Doktor",
-      payload: "DOCTOR_SCHEDULE"
-    },
-    {
-      en: "🦷 Dental Services",
-      tl: "🦷 Dental Services",
-      ceb: "🦷 Dental Services",
-      payload: "DENTAL_SERVICES"
-    },
-    {
-      en: "💊 Medicines",
-      tl: "💊 Mga Gamot",
-      ceb: "💊 Mga Tambal",
-      payload: "MEDICINES"
-    },
-    {
-      en: "📋 Medical Certificates",
-      tl: "📋 Medical Certificate",
-      ceb: "📋 Medical Certificate",
-      payload: "CERTIFICATES"
-    },
-    {
-      en: "🏥 Referrals & Hospitals",
-      tl: "🏥 Referral at Hospital",
-      ceb: "🏥 Referral ug Hospital",
-      payload: "REFERRALS"
-    },
-    {
-      en: "🚨 Emergency & First Aid",
-      tl: "🚨 Emergency at First Aid",
-      ceb: "🚨 Emergency ug First Aid",
-      payload: "EMERGENCY"
-    },
-    {
-      en: "✨ Other Services",
-      tl: "✨ Iba Pang Serbisyo",
-      ceb: "✨ Uban Pang Serbisyo",
-      payload: "OTHER_SERVICES"
-    }
+    { title: "📍 Clinic Info & Hours", payload: "CLINIC_INFO" },
+    { title: "👨‍⚕️ Doctor's Schedule", payload: "DOCTOR_SCHEDULE" },
+    { title: "🦷 Dental Services", payload: "DENTAL_SERVICES" },
+    { title: "💊 Medicines", payload: "MEDICINES" },
+    { title: "📋 Medical Certificates", payload: "CERTIFICATES" },
+    { title: "🏥 Referrals & Hospitals", payload: "REFERRALS" },
+    { title: "🚨 Emergency & First Aid", payload: "EMERGENCY" },
+    { title: "✨ Other Services", payload: "OTHER_SERVICES" },
+    { title: "👨‍💼 Talk to Admin", payload: "TALK_TO_ADMIN" }
   ];
 
-  // Messenger has limit of 13 quick replies, we have 8 so we're good
   const formattedReplies = quickReplies.map(item => ({
     content_type: "text",
-    title: item[lang] || item.en,
+    title: item.title,
     payload: item.payload
   }));
 
   const message = {
-    text: menuText[lang] || menuText.en,
+    text: menuText,
     quick_replies: formattedReplies
   };
 
@@ -472,6 +531,37 @@ function sendMessage(senderId, message) {
   });
 }
 
+// Admin endpoint to manually enable admin mode
+app.post('/admin/enable/:userId', (req, res) => {
+  const userId = req.params.userId;
+  enableAdminMode(userId);
+  res.json({ success: true, message: `Admin mode enabled for user ${userId}` });
+});
+
+// Admin endpoint to manually disable admin mode
+app.post('/admin/disable/:userId', (req, res) => {
+  const userId = req.params.userId;
+  disableAdminMode(userId, false);
+  res.json({ success: true, message: `Admin mode disabled for user ${userId}` });
+});
+
+// Admin endpoint to check user status
+app.get('/admin/status/:userId', (req, res) => {
+  const userId = req.params.userId;
+  const session = userSessions.get(userId);
+  
+  if (!session) {
+    res.json({ exists: false });
+  } else {
+    res.json({
+      exists: true,
+      adminMode: session.adminMode,
+      lastAdminActivity: session.lastAdminActivity,
+      lastLang: session.lastLang
+    });
+  }
+});
+
 // Health check endpoint
 app.get('/', (req, res) => {
   res.send('Saint Joseph College Clinic Chatbot with Gemini AI is running! 🏥🤖');
@@ -487,7 +577,7 @@ app.get('/test-gemini', async (req, res) => {
       lastLang: 'en'
     };
     
-    const response = await getGeminiResponse(testMessage, session);
+    const response = await getGeminiResponse(testMessage, session, 'en');
     res.json({
       success: true,
       userMessage: testMessage,
