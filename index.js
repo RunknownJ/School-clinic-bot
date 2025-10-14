@@ -140,9 +140,9 @@ function disableAdminMode(userId, autoDisabled = false) {
     if (autoDisabled) {
       const lang = session.lastLang || 'en';
       const reactivationMsg = {
-        en: "🤖 The chatbot is now active again! Feel free to ask me questions about the clinic, or type 'talk to admin' if you need to speak with a staff member.",
-        tl: "🤖 Ang chatbot ay aktibo na ulit! Magtanong ka tungkol sa clinic, o i-type ang 'talk to admin' kung kailangan mo ng staff.",
-        ceb: "🤖 Ang chatbot aktibo na usab! Pangutana ko bahin sa clinic, o i-type ang 'talk to admin' kung kinahanglan nimo ang staff."
+        en: "🤖 Meddy is now active again! Feel free to ask me questions about the clinic, or type 'talk to admin' if you need to speak with a staff member.",
+        tl: "🤖 Si Meddy ay aktibo na ulit! Magtanong ka tungkol sa clinic, o i-type ang 'talk to admin' kung kailangan mo ng staff.",
+        ceb: "🤖 Si Meddy aktibo na usab! Pangutana ko bahin sa clinic, o i-type ang 'talk to admin' kung kinahanglan nimo ang staff."
       };
       
       sendTextMessage(userId, reactivationMsg[lang] || reactivationMsg.en);
@@ -216,9 +216,9 @@ async function handleMessage(senderId, message) {
     enableAdminMode(senderId);
     
     const adminModeMsg = {
-      en: "👨‍💼 Admin mode activated! A clinic staff member has been notified and will respond to you shortly. The chatbot is now paused.\n\n(The chatbot will automatically reactivate after 15 minutes of admin inactivity)",
-      tl: "👨‍💼 Admin mode activated! Aabisuhan ang clinic staff at sasagutin ka nila. Ang chatbot ay naka-pause na.\n\n(Ang chatbot ay babalik pagkatapos ng 15 minuto ng walang admin activity)",
-      ceb: "👨‍💼 Admin mode activated! Pahibaw-an ang clinic staff ug tubagon ka nila. Ang chatbot gi-pause na.\n\n(Ang chatbot mobalik human sa 15 minuto nga walay admin activity)"
+      en: "👨‍💼 Admin mode activated! A clinic staff member has been notified and will respond to you shortly. Meddy is now paused.\n\n(Meddy will automatically reactivate after 15 minutes of admin inactivity)",
+      tl: "👨‍💼 Admin mode activated! Aabisuhan ang clinic staff at sasagutin ka nila. Si Meddy ay naka-pause na.\n\n(Si Meddy ay babalik pagkatapos ng 15 minuto ng walang admin activity)",
+      ceb: "👨‍💼 Admin mode activated! Pahibaw-an ang clinic staff ug tubagon ka nila. Si Meddy gi-pause na.\n\n(Si Meddy mobalik human sa 15 minuto nga walay admin activity)"
     };
     
     sendTextMessage(senderId, adminModeMsg[session.lastLang] || adminModeMsg.en);
@@ -290,7 +290,7 @@ async function getGeminiResponse(userMessage, session, detectedLang) {
     if (session.conversationHistory.length > 0) {
       conversationContext = '\n\nRECENT CONVERSATION:\n';
       session.conversationHistory.slice(-3).forEach(exchange => {
-        conversationContext += `User: ${exchange.user}\nAssistant: ${exchange.bot}\n`;
+        conversationContext += `User: ${exchange.user}\nMeddy: ${exchange.bot}\n`;
       });
     }
 
@@ -304,7 +304,7 @@ async function getGeminiResponse(userMessage, session, detectedLang) {
       languageInstruction = 'IMPORTANT: Respond in English language.';
     }
 
-    const prompt = `You are a helpful assistant for Saint Joseph College Clinic.
+    const prompt = `You are Meddy, a helpful assistant for Saint Joseph College Clinic. When introducing yourself or when appropriate, mention that you are Meddy, the clinic chatbot.
 
 ${languageInstruction}
 
@@ -428,7 +428,7 @@ function handlePostback(senderId, postback) {
   if (payload === 'TALK_TO_ADMIN') {
     enableAdminMode(senderId);
     
-    const adminModeMsg = "👨‍💼 Admin mode activated! A clinic staff member has been notified and will respond to you shortly. The chatbot is now paused.\n\n(The chatbot will automatically reactivate after 15 minutes of admin inactivity)";
+    const adminModeMsg = "👨‍💼 Admin mode activated! A clinic staff member has been notified and will respond to you shortly. Meddy is now paused.\n\n(Meddy will automatically reactivate after 15 minutes of admin inactivity)";
     
     sendTextMessage(senderId, adminModeMsg);
     updateAdminActivity(senderId);
@@ -467,7 +467,7 @@ function sendMainMenu(senderId, lang = 'en') {
     return;
   }
 
-  const menuText = "🏥 Saint Joseph College Clinic\n\nChoose a category below:";
+  const menuText = "🏥 Saint Joseph College Clinic\n👋 Hi! I'm Meddy, your clinic assistant!\n\nChoose a category below:";
 
   const quickReplies = [
     { title: "📍 Clinic Info & Hours", payload: "CLINIC_INFO" },
@@ -564,7 +564,7 @@ app.get('/admin/status/:userId', (req, res) => {
 
 // Health check endpoint
 app.get('/', (req, res) => {
-  res.send('Saint Joseph College Clinic Chatbot with Gemini AI is running! 🏥🤖');
+  res.send('Meddy - Saint Joseph College Clinic Chatbot with Gemini AI is running! 🏥🤖');
 });
 
 // Test Gemini endpoint
