@@ -20,13 +20,13 @@ const AI_MODELS = [
   {
     name: 'gemini-1.5-flash',
     type: 'gemini',
-    maxRequests: 15, // 1500/day = ~62/hour = ~15/minute safely
+    maxRequests: 15,
     enabled: true
   },
   {
     name: 'gemini-1.5-pro',
     type: 'gemini',
-    maxRequests: 2, // Lower limit for pro model
+    maxRequests: 2,
     enabled: true
   },
   {
@@ -38,7 +38,7 @@ const AI_MODELS = [
 ];
 
 let currentModelIndex = 0;
-let modelFailCount = new Map(); // Track consecutive failures per model
+let modelFailCount = new Map();
 
 // Rate limiting for AI API
 const requestQueue = [];
@@ -93,12 +93,10 @@ const CLINIC_INFO = {
   }
 };
 
-// Get current AI model
 function getCurrentModel() {
   return AI_MODELS[currentModelIndex];
 }
 
-// Switch to next available model
 function switchToNextModel() {
   const startIndex = currentModelIndex;
   do {
@@ -107,21 +105,19 @@ function switchToNextModel() {
     
     if (model.enabled) {
       console.log(`🔄 Switched to model: ${model.name} (${model.type})`);
-      requestCount = 0; // Reset counter for new model
+      requestCount = 0;
       lastResetTime = Date.now();
       return model;
     }
   } while (currentModelIndex !== startIndex);
   
-  // If all models failed, use basic mode
   currentModelIndex = AI_MODELS.findIndex(m => m.type === 'basic');
   console.log('⚠️ All AI models unavailable, using basic mode');
   return AI_MODELS[currentModelIndex];
 }
 
-// User session management with admin mode support
 const userSessions = new Map();
-const ADMIN_INACTIVE_TIMEOUT = 15 * 60 * 1000; // 15 minutes
+const ADMIN_INACTIVE_TIMEOUT = 15 * 60 * 1000;
 
 function getUserSession(userId) {
   if (!userSessions.has(userId)) {
@@ -145,7 +141,6 @@ function getUserSession(userId) {
   return session;
 }
 
-// Enable admin mode for a user
 function enableAdminMode(userId) {
   const session = getUserSession(userId);
   session.adminMode = true;
@@ -158,7 +153,6 @@ function enableAdminMode(userId) {
   console.log(`✅ Admin mode ENABLED for user ${userId}`);
 }
 
-// Update admin activity timestamp
 function updateAdminActivity(userId) {
   const session = userSessions.get(userId);
   if (session && session.adminMode) {
@@ -176,7 +170,6 @@ function updateAdminActivity(userId) {
   }
 }
 
-// Disable admin mode for a user
 function disableAdminMode(userId, autoDisabled = false) {
   const session = userSessions.get(userId);
   if (session && session.adminMode) {
@@ -195,7 +188,7 @@ function disableAdminMode(userId, autoDisabled = false) {
       const reactivationMsg = {
         en: "🤖 Meddy is now active again! Feel free to ask me questions about the clinic, or type 'talk to admin' if you need to speak with a staff member.",
         tl: "🤖 Si Meddy ay aktibo na ulit! Magtanong ka tungkol sa clinic, o i-type ang 'talk to admin' kung kailangan mo ng staff.",
-        ceb: "🤖 Si Meddy aktibo na usab! Pangutana ko bahin sa clinic, o i-type ang 'talk to admin' kung kinahanglan nimo ang staff."
+        ceb: "🤖 Si Meddy aktibo na usab! Pangutana ko bahin sa clinic, o i-type ang 'talk to admin' kung kinahanglan mo ang staff."
       };
       
       sendTextMessage(userId, reactivationMsg[lang] || reactivationMsg.en);
@@ -206,7 +199,6 @@ function disableAdminMode(userId, autoDisabled = false) {
   }
 }
 
-// Clean up old sessions (30 minutes)
 setInterval(() => {
   const now = Date.now();
   for (const [userId, session] of userSessions.entries()) {
@@ -220,7 +212,6 @@ setInterval(() => {
   }
 }, 300000);
 
-// Webhook verification
 app.get('/webhook', (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
@@ -234,7 +225,6 @@ app.get('/webhook', (req, res) => {
   }
 });
 
-// Receive messages
 app.post('/webhook', (req, res) => {
   const body = req.body;
 
@@ -327,7 +317,6 @@ async function handleMessage(senderId, message) {
   }
 }
 
-// Queue AI requests with model fallback
 async function queueAIRequest(userMessage, session, lang) {
   return new Promise((resolve, reject) => {
     requestQueue.push({ userMessage, session, lang, resolve, reject });
@@ -335,7 +324,6 @@ async function queueAIRequest(userMessage, session, lang) {
   });
 }
 
-// Process queued requests with rate limiting and model switching
 async function processQueue() {
   if (isProcessingQueue || requestQueue.length === 0) return;
   
@@ -369,22 +357,19 @@ async function processQueue() {
       requestCount++;
       console.log(`📊 AI requests: ${requestCount}/${currentModel.maxRequests} this minute (${currentModel.name})`);
       
-      // Reset fail count on success
       modelFailCount.set(currentModel.name, 0);
       
       request.resolve(response);
     } catch (error) {
       console.error(`❌ Error with ${currentModel.name}:`, error.message);
       
-      // Track consecutive failures
       const failCount = (modelFailCount.get(currentModel.name) || 0) + 1;
       modelFailCount.set(currentModel.name, failCount);
       
-      // If failed 3 times or quota error, switch model
       if (error.message.includes('429') || error.message.includes('quota') || failCount >= 3) {
         console.log(`⚠️ Switching from ${currentModel.name} due to ${failCount} failures`);
         switchToNextModel();
-        requestQueue.unshift(request); // Retry with new model
+        requestQueue.unshift(request);
         requestCount = 0;
       } else {
         request.reject(error);
@@ -395,7 +380,6 @@ async function processQueue() {
   isProcessingQueue = false;
 }
 
-// Get AI response with model fallback
 async function getAIResponse(userMessage, session, detectedLang) {
   const currentModel = getCurrentModel();
   
@@ -411,7 +395,6 @@ async function getAIResponse(userMessage, session, detectedLang) {
   }
 }
 
-// Gemini AI Response
 async function getGeminiResponse(userMessage, session, detectedLang, modelName) {
   if (!GEMINI_API_KEY) {
     throw new Error('GEMINI_API_KEY not configured');
@@ -512,81 +495,105 @@ Respond in 2-4 sentences in ${detectedLang === 'ceb' ? 'Bisaya/Cebuano' : detect
   return response.text();
 }
 
-// Basic Mode Response (keyword-based fallback)
+// Basic Mode Response (keyword-based fallback) - FIXED VERSION
 function getBasicResponse(userMessage, session, lang) {
   const lowerMsg = userMessage.toLowerCase();
   
   const responses = {
     en: {
-      greeting: "👋 Hi! I'm Meddy, your clinic assistant. I'm currently in basic mode. How can I help you with the clinic?",
+      greeting: "👋 Hi! I'm Meddy, your clinic assistant. How can I help you today?",
       location: "📍 The clinic is located on the Ground Floor beside the Theology Office. The dental clinic is at the Junior High School Department.",
       hours: "🕐 Clinic Hours:\n- Monday-Friday: 8:00 AM – 5:00 PM\n- Saturday: 8:00 AM – 12:00 NN\n- Closed Sundays & holidays",
       doctor: "👨‍⚕️ Doctor's Schedule:\n- Tuesday, Wednesday, Thursday: 9:00 AM - 12:00 NN\n- Outside these hours, students can still visit for basic care.",
-      dentist: "🦷 Dentist Schedule:\n- Mon-Fri: 8:30-11:30 AM & 1:30-4:30 PM\n- Saturday: 8:00-11:30 AM\n- 10 extraction slots per session",
+      dentist: "🦷 Dentist Schedule:\n- Mon-Fri: 8:30-11:30 AM & 1:30-4:30 PM\n- Saturday: 8:00-11:30 AM\n- 10 extraction slots per session\n- FREE anesthesia during extraction",
       medicines: "💊 Available Medicines (FREE):\n- Paracetamol, Dycolsen, Dycolgen, Loperamide, Erceflora, Antacid\n- Maximum 2 medicines per person\n- Parental consent required for minors",
       extraction: "🦷 Tooth Extraction Process:\n1. Visit Main Campus Clinic\n2. Get referral slip\n3. Go to Dental Clinic at Junior High School\n4. Anesthesia is FREE!",
       certificate: "📋 Medical certificates are issued for school excuses, fever, asthma attacks, and other verified illnesses.",
       emergency: "🚨 Emergency Procedure:\n1. Inform teacher/staff\n2. Get escorted to clinic\n3. Receive first aid\n4. Hospital referral if needed",
       referral: "🏥 Referral Hospital: Dongon Hospital\n- Emergency: Go directly\n- Regular: Visit clinic first for documentation",
-      default: "I'm in basic mode right now. Please choose from the menu below or type 'talk to admin' to speak with clinic staff."
+      services: "✨ Other Services (ALL FREE for enrolled students):\n- First aid treatment\n- Chronic condition monitoring\n- Hospital referrals\n- Health counseling\n- Preventive care tips",
+      default: "I'm here to help! Please ask me about:\n- Clinic location & hours\n- Doctor/dentist schedule\n- Medicines available\n- Tooth extraction\n- Medical certificates\n- Hospital referrals\n- Emergency procedures\n\nOr type 'talk to admin' to speak with clinic staff."
     },
     tl: {
-      greeting: "👋 Kumusta! Ako si Meddy, ang clinic assistant. Nasa basic mode ako ngayon. Paano kita matutulungan sa clinic?",
+      greeting: "👋 Kumusta! Ako si Meddy, ang clinic assistant. Paano kita matutulungan ngayon?",
       location: "📍 Ang clinic ay matatagpuan sa Ground Floor beside the Theology Office. Ang dental clinic ay sa Junior High School Department.",
       hours: "🕐 Oras ng Clinic:\n- Lunes-Biyernes: 8:00 AM – 5:00 PM\n- Sabado: 8:00 AM – 12:00 NN\n- Sarado tuwing Linggo at holiday",
       doctor: "👨‍⚕️ Schedule ng Doktor:\n- Martes, Miyerkules, Huwebes: 9:00 AM - 12:00 NN\n- Pwede pa rin bisitahin ang clinic para sa basic care.",
-      dentist: "🦷 Schedule ng Dentista:\n- Lun-Biy: 8:30-11:30 AM & 1:30-4:30 PM\n- Sabado: 8:00-11:30 AM\n- 10 extraction slots per session",
+      dentist: "🦷 Schedule ng Dentista:\n- Lun-Biy: 8:30-11:30 AM & 1:30-4:30 PM\n- Sabado: 8:00-11:30 AM\n- 10 extraction slots per session\n- LIBRE ang anesthesia",
       medicines: "💊 Available na Gamot (LIBRE):\n- Paracetamol, Dycolsen, Dycolgen, Loperamide, Erceflora, Antacid\n- Maximum 2 gamot per tao\n- Kailangan ng consent ng magulang para sa menor de edad",
       extraction: "🦷 Proseso ng Tooth Extraction:\n1. Pumunta sa Main Campus Clinic\n2. Kumuha ng referral slip\n3. Pumunta sa Dental Clinic sa Junior High School\n4. Anesthesia ay LIBRE!",
       certificate: "📋 Ang medical certificate ay ibinibigay para sa school excuse, lagnat, asthma attack, at iba pang sakit.",
       emergency: "🚨 Emergency Procedure:\n1. Sabihin sa teacher/staff\n2. Ihahatid sa clinic\n3. Makakatanggap ng first aid\n4. Hospital referral kung kailangan",
       referral: "🏥 Referral Hospital: Dongon Hospital\n- Emergency: Diretso sa hospital\n- Regular: Bisitahin muna ang clinic",
-      default: "Nasa basic mode ako ngayon. Pumili sa menu sa ibaba o i-type ang 'talk to admin' para makipag-usap sa clinic staff."
+      services: "✨ Ibang Services (LAHAT LIBRE para sa enrolled students):\n- First aid treatment\n- Monitoring ng chronic conditions\n- Hospital referrals\n- Health counseling\n- Preventive care tips",
+      default: "Nandito ako para tumulong! Tanungin mo ako tungkol sa:\n- Clinic location & oras\n- Doctor/dentist schedule\n- Available na gamot\n- Tooth extraction\n- Medical certificates\n- Hospital referrals\n- Emergency procedures\n\nO i-type ang 'talk to admin' para makipag-usap sa clinic staff."
     },
     ceb: {
-      greeting: "👋 Kumusta! Ako si Meddy, ang clinic assistant. Naa ko sa basic mode karon. Unsaon nako pagtabang nimo sa clinic?",
+      greeting: "👋 Kumusta! Ako si Meddy, ang clinic assistant. Unsaon nako pagtabang nimo?",
       location: "📍 Ang clinic naa sa Ground Floor beside the Theology Office. Ang dental clinic naa sa Junior High School Department.",
       hours: "🕐 Oras sa Clinic:\n- Lunes-Biyernes: 8:00 AM – 5:00 PM\n- Sabado: 8:00 AM – 12:00 NN\n- Sarado tuwing Domingo ug holiday",
       doctor: "👨‍⚕️ Schedule sa Doktor:\n- Martes, Miyerkules, Huwebes: 9:00 AM - 12:00 NN\n- Pwede gihapon moduaw sa clinic para sa basic care.",
-      dentist: "🦷 Schedule sa Dentista:\n- Lun-Biy: 8:30-11:30 AM & 1:30-4:30 PM\n- Sabado: 8:00-11:30 AM\n- 10 extraction slots per session",
+      dentist: "🦷 Schedule sa Dentista:\n- Lun-Biy: 8:30-11:30 AM & 1:30-4:30 PM\n- Sabado: 8:00-11:30 AM\n- 10 extraction slots per session\n- LIBRE ang anesthesia",
       medicines: "💊 Available nga Tambal (LIBRE):\n- Paracetamol, Dycolsen, Dycolgen, Loperamide, Erceflora, Antacid\n- Maximum 2 ka tambal per tawo\n- Kinahanglan og consent sa ginikanan para sa menor de edad",
       extraction: "🦷 Proseso sa Tooth Extraction:\n1. Adto sa Main Campus Clinic\n2. Kuha og referral slip\n3. Adto sa Dental Clinic sa Junior High School\n4. Anesthesia LIBRE!",
       certificate: "📋 Ang medical certificate ihatag para sa school excuse, hilanat, asthma attack, ug uban pang sakit.",
       emergency: "🚨 Emergency Procedure:\n1. Sulti sa teacher/staff\n2. Dad-on sa clinic\n3. Makadawat og first aid\n4. Hospital referral kung kinahanglan",
       referral: "🏥 Referral Hospital: Dongon Hospital\n- Emergency: Direkta sa hospital\n- Regular: Duaw sa una sa clinic",
-      default: "Naa ko sa basic mode karon. Pili sa menu sa ubos o i-type ang 'talk to admin' para makigsulti sa clinic staff."
+      services: "✨ Uban pang Services (LAHAT LIBRE para sa enrolled students):\n- First aid treatment\n- Monitoring ng chronic conditions\n- Hospital referrals\n- Health counseling\n- Preventive care tips",
+      default: "Nandito ako para tumulong! Pangutana ko tungkol sa:\n- Clinic location & oras\n- Doctor/dentist schedule\n- Available na tambal\n- Tooth extraction\n- Medical certificates\n- Hospital referrals\n- Emergency procedures\n\nO i-type ang 'talk to admin' para makipag-usap sa clinic staff."
     }
   };
 
   const langResponses = responses[lang] || responses.en;
 
-  // Keyword matching
-  if (/(hi|hello|hey|kumusta|kamusta)/i.test(lowerMsg)) {
+  // Keyword matching with better logic
+  if (/(hi|hello|hey|kumusta|kamusta|unsay sabay|pregunta|question|help)/i.test(lowerMsg)) {
     return langResponses.greeting;
-  } else if (/(where|location|asa|saan|diin)/i.test(lowerMsg)) {
+  } 
+  
+  if (/(where|location|asa|saan|diin|located|clinic info)/i.test(lowerMsg)) {
     return langResponses.location;
-  } else if (/(hours|time|schedule|oras|oras)/i.test(lowerMsg) && !/(doctor|dentist|doktor|dentista)/i.test(lowerMsg)) {
+  } 
+  
+  if (/(hours|time|schedule|oras|open|close|when open|sarado|bukas)/i.test(lowerMsg) && !/(doctor|dentist|doktor|dentista)/i.test(lowerMsg)) {
     return langResponses.hours;
-  } else if (/(doctor|doktor)/i.test(lowerMsg)) {
+  } 
+  
+  if (/(doctor|doktor|physician|visit doctor|makita doctor)/i.test(lowerMsg)) {
     return langResponses.doctor;
-  } else if (/(dentist|dental|ngipon|bungo|dentista)/i.test(lowerMsg)) {
+  } 
+  
+  if (/(dentist|dental|ngipon|bungo|dentista|tooth|gigi)/i.test(lowerMsg)) {
     return langResponses.dentist;
-  } else if (/(medicine|gamot|tambal)/i.test(lowerMsg)) {
+  } 
+  
+  if (/(medicine|gamot|tambal|drugs|medication)/i.test(lowerMsg)) {
     return langResponses.medicines;
-  } else if (/(extraction|bunot|tanggal|extract)/i.test(lowerMsg)) {
+  } 
+  
+  if (/(extraction|bunot|tanggal|extract|tooth extraction|ngipon)/i.test(lowerMsg)) {
     return langResponses.extraction;
-  } else if (/(certificate|certify)/i.test(lowerMsg)) {
+  } 
+  
+  if (/(certificate|certify|cert|excuse)/i.test(lowerMsg)) {
     return langResponses.certificate;
-  } else if (/(emergency|emerhensya|kadalian)/i.test(lowerMsg)) {
+  } 
+  
+  if (/(emergency|emerhensya|kadalian|urgent|accident|injury|injured)/i.test(lowerMsg)) {
     return langResponses.emergency;
-  } else if (/(referral|hospital|ospital)/i.test(lowerMsg)) {
+  } 
+  
+  if (/(referral|hospital|ospital|dongon|refer)/i.test(lowerMsg)) {
     return langResponses.referral;
-  } else {
-    return langResponses.default;
   }
+  
+  if (/(service|services|offer|other|what do you have|ano ang)/i.test(lowerMsg)) {
+    return langResponses.services;
+  }
+  
+  return langResponses.default;
 }
 
-// Fallback language detection
 function detectLanguageFallback(text) {
   const lowerText = text.toLowerCase();
   
@@ -606,7 +613,6 @@ function detectLanguageFallback(text) {
   return 'en';
 }
 
-// Handle postbacks
 function handlePostback(senderId, postback) {
   const payload = postback.payload;
   const session = getUserSession(senderId);
@@ -655,7 +661,6 @@ function handlePostback(senderId, postback) {
   }
 }
 
-// Send main menu (always in English)
 function sendMainMenu(senderId, lang = 'en') {
   const session = getUserSession(senderId);
   
@@ -691,7 +696,6 @@ function sendMainMenu(senderId, lang = 'en') {
   sendMessage(senderId, message);
 }
 
-// Send typing indicator
 function sendTypingIndicator(senderId, isTyping) {
   const action = isTyping ? 'typing_on' : 'typing_off';
   
@@ -707,12 +711,10 @@ function sendTypingIndicator(senderId, isTyping) {
   });
 }
 
-// Send text message
 function sendTextMessage(senderId, text) {
   sendMessage(senderId, { text });
 }
 
-// Send message via Messenger API with improved error handling
 function sendMessage(senderId, message) {
   axios.post(`https://graph.facebook.com/v18.0/me/messages`, {
     recipient: { id: senderId },
@@ -743,21 +745,18 @@ function sendMessage(senderId, message) {
   });
 }
 
-// Admin endpoint to manually enable admin mode
 app.post('/admin/enable/:userId', (req, res) => {
   const userId = req.params.userId;
   enableAdminMode(userId);
   res.json({ success: true, message: `Admin mode enabled for user ${userId}` });
 });
 
-// Admin endpoint to manually disable admin mode
 app.post('/admin/disable/:userId', (req, res) => {
   const userId = req.params.userId;
   disableAdminMode(userId, false);
   res.json({ success: true, message: `Admin mode disabled for user ${userId}` });
 });
 
-// Admin endpoint to check user status
 app.get('/admin/status/:userId', (req, res) => {
   const userId = req.params.userId;
   const session = userSessions.get(userId);
@@ -775,7 +774,6 @@ app.get('/admin/status/:userId', (req, res) => {
   }
 });
 
-// Admin endpoint to list all active sessions
 app.get('/admin/sessions', (req, res) => {
   const sessions = [];
   for (const [userId, session] of userSessions.entries()) {
@@ -790,7 +788,6 @@ app.get('/admin/sessions', (req, res) => {
   res.json({ totalSessions: sessions.length, sessions });
 });
 
-// Endpoint to check current AI model status
 app.get('/admin/ai-status', (req, res) => {
   const currentModel = getCurrentModel();
   res.json({
@@ -808,7 +805,6 @@ app.get('/admin/ai-status', (req, res) => {
   });
 });
 
-// Endpoint to manually switch AI model
 app.post('/admin/switch-model/:index', (req, res) => {
   const index = parseInt(req.params.index);
   if (index >= 0 && index < AI_MODELS.length) {
@@ -823,13 +819,11 @@ app.post('/admin/switch-model/:index', (req, res) => {
   }
 });
 
-// Health check endpoint
 app.get('/', (req, res) => {
   const currentModel = getCurrentModel();
   res.send(`✅ Meddy - Saint Joseph College Clinic Chatbot is running! 🏥🤖\n\nCurrent AI Model: ${currentModel.name} (${currentModel.type})\nRequests: ${requestCount}/${currentModel.maxRequests} this minute`);
 });
 
-// Test AI endpoint
 app.get('/test-ai', async (req, res) => {
   const testMessage = req.query.message || 'When is the dentist available?';
   const lang = req.query.lang || 'en';
@@ -858,7 +852,6 @@ app.get('/test-ai', async (req, res) => {
   }
 });
 
-// Check available Gemini models
 app.get('/test-models', async (req, res) => {
   try {
     if (!GEMINI_API_KEY) {
@@ -895,7 +888,6 @@ app.get('/test-models', async (req, res) => {
   }
 });
 
-// Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   const currentModel = getCurrentModel();
