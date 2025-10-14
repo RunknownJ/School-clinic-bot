@@ -15,6 +15,13 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 // Initialize Gemini AI
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
+// Rate limiting for Gemini API
+const requestQueue = [];
+let isProcessingQueue = false;
+const MAX_REQUESTS_PER_MINUTE = 9; // Stay under free tier limit of 10
+let requestCount = 0;
+let lastResetTime = Date.now();
+
 // Saint Joseph College Clinic Information
 const CLINIC_INFO = {
   location: {
@@ -99,7 +106,7 @@ function enableAdminMode(userId) {
     clearTimeout(session.adminInactivityTimer);
   }
   
-  console.log(`Admin mode ENABLED for user ${userId}`);
+  console.log(`✅ Admin mode ENABLED for user ${userId}`);
 }
 
 // Update admin activity timestamp
@@ -118,7 +125,7 @@ function updateAdminActivity(userId) {
       disableAdminMode(userId, true);
     }, ADMIN_INACTIVE_TIMEOUT);
     
-    console.log(`Admin activity updated for user ${userId}`);
+    console.log(`🔄 Admin activity updated for user ${userId}`);
   }
 }
 
@@ -134,7 +141,7 @@ function disableAdminMode(userId, autoDisabled = false) {
       session.adminInactivityTimer = null;
     }
     
-    console.log(`Admin mode DISABLED for user ${userId} ${autoDisabled ? '(auto)' : '(manual)'}`);
+    console.log(`🔴 Admin mode DISABLED for user ${userId} ${autoDisabled ? '(auto)' : '(manual)'}`);
     
     // Notify user that chatbot is back
     if (autoDisabled) {
@@ -162,6 +169,7 @@ setInterval(() => {
         clearTimeout(session.adminInactivityTimer);
       }
       userSessions.delete(userId);
+      console.log(`🧹 Cleaned up old session for user ${userId}`);
     }
   }
 }, 300000);
@@ -173,7 +181,7 @@ app.get('/webhook', (req, res) => {
   const challenge = req.query['hub.challenge'];
 
   if (mode && token === VERIFY_TOKEN) {
-    console.log('Webhook verified');
+    console.log('✅ Webhook verified');
     res.status(200).send(challenge);
   } else {
     res.sendStatus(403);
@@ -231,13 +239,13 @@ async function handleMessage(senderId, message) {
   // If admin mode is active, just update activity and let admin handle it
   if (session.adminMode) {
     updateAdminActivity(senderId);
-    console.log(`Message from user ${senderId} in admin mode - chatbot paused`);
+    console.log(`💬 Message from user ${senderId} in admin mode - chatbot paused`);
     return; // Don't respond with chatbot
   }
 
   try {
     sendTypingIndicator(senderId, true);
-    console.log('User message:', text);
+    console.log('📨 User message:', text);
 
     if (!GEMINI_API_KEY) {
       throw new Error('GEMINI_API_KEY not configured');
@@ -247,8 +255,8 @@ async function handleMessage(senderId, message) {
     const lang = detectLanguageFallback(text);
     session.lastLang = lang;
 
-    const geminiResponse = await getGeminiResponse(text, session, lang);
-    console.log('Gemini response:', geminiResponse);
+    const geminiResponse = await queueGeminiRequest(text, session, lang);
+    console.log('🤖 Gemini response:', geminiResponse);
     
     session.conversationHistory.push({
       user: text,
@@ -280,6 +288,66 @@ async function handleMessage(senderId, message) {
     sendTextMessage(senderId, errorMsg);
     setTimeout(() => sendMainMenu(senderId, session.lastLang || 'en'), 1000);
   }
+}
+
+// Queue Gemini requests to handle rate limiting
+async function queueGeminiRequest(userMessage, session, lang) {
+  return new Promise((resolve, reject) => {
+    requestQueue.push({ userMessage, session, lang, resolve, reject });
+    processQueue();
+  });
+}
+
+// Process queued requests with rate limiting
+async function processQueue() {
+  if (isProcessingQueue || requestQueue.length === 0) return;
+  
+  isProcessingQueue = true;
+  
+  while (requestQueue.length > 0) {
+    // Reset counter every minute
+    const now = Date.now();
+    if (now - lastResetTime >= 60000) {
+      requestCount = 0;
+      lastResetTime = now;
+      console.log('🔄 Rate limit counter reset');
+    }
+    
+    // Wait if we've hit the rate limit
+    if (requestCount >= MAX_REQUESTS_PER_MINUTE) {
+      const waitTime = 60000 - (now - lastResetTime);
+      console.log(`⏳ Rate limit reached. Waiting ${Math.ceil(waitTime / 1000)}s...`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+      requestCount = 0;
+      lastResetTime = Date.now();
+    }
+    
+    const request = requestQueue.shift();
+    try {
+      const response = await getGeminiResponse(
+        request.userMessage,
+        request.session,
+        request.lang
+      );
+      requestCount++;
+      console.log(`📊 Gemini requests: ${requestCount}/${MAX_REQUESTS_PER_MINUTE} this minute`);
+      request.resolve(response);
+    } catch (error) {
+      // If it's a rate limit error, put the request back in queue
+      if (error.message.includes('429') || error.message.includes('quota')) {
+        console.log('⚠️ Rate limit hit, requeueing request');
+        requestQueue.unshift(request); // Put back at front of queue
+        requestCount = MAX_REQUESTS_PER_MINUTE; // Force wait
+        await new Promise(resolve => setTimeout(resolve, 60000)); // Wait 1 minute
+        requestCount = 0;
+        lastResetTime = Date.now();
+      } else {
+        request.reject(error);
+      }
+    }
+  }
+  
+  isProcessingQueue = false;
 }
 
 async function getGeminiResponse(userMessage, session, detectedLang) {
@@ -379,7 +447,7 @@ Respond in 2-4 sentences in ${detectedLang === 'ceb' ? 'Bisaya/Cebuano' : detect
     const response = await result.response;
     return response.text();
   } catch (error) {
-    console.error('Gemini API Error:', error.message);
+    console.error('❌ Gemini API Error:', error.message);
     throw error;
   }
 }
@@ -409,7 +477,7 @@ function handlePostback(senderId, postback) {
   const payload = postback.payload;
   const session = getUserSession(senderId);
 
-  console.log('Postback payload:', payload);
+  console.log('📍 Postback payload:', payload);
 
   // If admin mode is active, update activity
   if (session.adminMode) {
@@ -505,7 +573,10 @@ function sendTypingIndicator(senderId, isTyping) {
   }, {
     params: { access_token: PAGE_ACCESS_TOKEN }
   }).catch(error => {
-    console.error('Error sending typing indicator:', error.message);
+    // Silently handle typing indicator errors (user might have blocked)
+    if (error.response?.data?.error?.code !== 100) {
+      console.error('⚠️ Typing indicator error:', error.message);
+    }
   });
 }
 
@@ -514,7 +585,7 @@ function sendTextMessage(senderId, text) {
   sendMessage(senderId, { text });
 }
 
-// Send message via Messenger API
+// Send message via Messenger API with improved error handling
 function sendMessage(senderId, message) {
   axios.post(`https://graph.facebook.com/v18.0/me/messages`, {
     recipient: { id: senderId },
@@ -524,10 +595,27 @@ function sendMessage(senderId, message) {
     params: { access_token: PAGE_ACCESS_TOKEN }
   })
   .then(response => {
-    console.log('Message sent successfully');
+    console.log('✅ Message sent successfully');
   })
   .catch(error => {
-    console.error('Error sending message:', error.response?.data || error.message);
+    const errorData = error.response?.data?.error;
+    const errorCode = errorData?.code;
+    const errorSubcode = errorData?.error_subcode;
+    
+    // Handle "No matching user found" errors silently
+    if (errorCode === 100 && errorSubcode === 2018001) {
+      console.log(`⚠️ User ${senderId} not reachable (blocked/deleted/unsubscribed)`);
+      return;
+    }
+    
+    // Handle other user-related errors
+    if (errorCode === 100) {
+      console.log(`⚠️ Cannot send to user ${senderId}: ${errorData?.message}`);
+      return;
+    }
+    
+    // Log other errors normally
+    console.error('❌ Error sending message:', errorData || error.message);
   });
 }
 
@@ -557,14 +645,30 @@ app.get('/admin/status/:userId', (req, res) => {
       exists: true,
       adminMode: session.adminMode,
       lastAdminActivity: session.lastAdminActivity,
-      lastLang: session.lastLang
+      lastLang: session.lastLang,
+      conversationCount: session.conversationCount
     });
   }
 });
 
+// Admin endpoint to list all active sessions
+app.get('/admin/sessions', (req, res) => {
+  const sessions = [];
+  for (const [userId, session] of userSessions.entries()) {
+    sessions.push({
+      userId,
+      adminMode: session.adminMode,
+      lastLang: session.lastLang,
+      conversationCount: session.conversationCount,
+      lastInteraction: new Date(session.lastInteraction).toISOString()
+    });
+  }
+  res.json({ totalSessions: sessions.length, sessions });
+});
+
 // Health check endpoint
 app.get('/', (req, res) => {
-  res.send('Meddy - Saint Joseph College Clinic Chatbot with Gemini AI is running! 🏥🤖');
+  res.send('✅ Meddy - Saint Joseph College Clinic Chatbot with Gemini AI is running! 🏥🤖');
 });
 
 // Test Gemini endpoint
@@ -620,6 +724,7 @@ app.get('/test-models', async (req, res) => {
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-  console.log(`Gemini AI integration: ${GEMINI_API_KEY ? 'ENABLED' : 'DISABLED - Add GEMINI_API_KEY to enable'}`);
+  console.log(`🚀 Server is running on port ${PORT}`);
+  console.log(`🤖 Gemini AI integration: ${GEMINI_API_KEY ? 'ENABLED ✅' : 'DISABLED ❌ - Add GEMINI_API_KEY to enable'}`);
+  console.log(`⏱️  Rate limit: ${MAX_REQUESTS_PER_MINUTE} requests per minute`);
 });
