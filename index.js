@@ -15,10 +15,34 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 // Initialize Gemini AI
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
-// Rate limiting for Gemini API
+// AI Model Configuration with multiple fallbacks
+const AI_MODELS = [
+  {
+    name: 'gemini-1.5-flash',
+    type: 'gemini',
+    maxRequests: 15, // 1500/day = ~62/hour = ~15/minute safely
+    enabled: true
+  },
+  {
+    name: 'gemini-1.5-pro',
+    type: 'gemini',
+    maxRequests: 2, // Lower limit for pro model
+    enabled: true
+  },
+  {
+    name: 'basic',
+    type: 'basic',
+    maxRequests: 999,
+    enabled: true
+  }
+];
+
+let currentModelIndex = 0;
+let modelFailCount = new Map(); // Track consecutive failures per model
+
+// Rate limiting for AI API
 const requestQueue = [];
 let isProcessingQueue = false;
-const MAX_REQUESTS_PER_MINUTE = 9; // Stay under free tier limit of 10
 let requestCount = 0;
 let lastResetTime = Date.now();
 
@@ -69,6 +93,32 @@ const CLINIC_INFO = {
   }
 };
 
+// Get current AI model
+function getCurrentModel() {
+  return AI_MODELS[currentModelIndex];
+}
+
+// Switch to next available model
+function switchToNextModel() {
+  const startIndex = currentModelIndex;
+  do {
+    currentModelIndex = (currentModelIndex + 1) % AI_MODELS.length;
+    const model = AI_MODELS[currentModelIndex];
+    
+    if (model.enabled) {
+      console.log(`🔄 Switched to model: ${model.name} (${model.type})`);
+      requestCount = 0; // Reset counter for new model
+      lastResetTime = Date.now();
+      return model;
+    }
+  } while (currentModelIndex !== startIndex);
+  
+  // If all models failed, use basic mode
+  currentModelIndex = AI_MODELS.findIndex(m => m.type === 'basic');
+  console.log('⚠️ All AI models unavailable, using basic mode');
+  return AI_MODELS[currentModelIndex];
+}
+
 // User session management with admin mode support
 const userSessions = new Map();
 const ADMIN_INACTIVE_TIMEOUT = 15 * 60 * 1000; // 15 minutes
@@ -101,7 +151,6 @@ function enableAdminMode(userId) {
   session.adminMode = true;
   session.lastAdminActivity = Date.now();
   
-  // Clear any existing timer
   if (session.adminInactivityTimer) {
     clearTimeout(session.adminInactivityTimer);
   }
@@ -115,12 +164,10 @@ function updateAdminActivity(userId) {
   if (session && session.adminMode) {
     session.lastAdminActivity = Date.now();
     
-    // Clear existing timer
     if (session.adminInactivityTimer) {
       clearTimeout(session.adminInactivityTimer);
     }
     
-    // Set new timer for auto-disable after 15 minutes
     session.adminInactivityTimer = setTimeout(() => {
       disableAdminMode(userId, true);
     }, ADMIN_INACTIVE_TIMEOUT);
@@ -143,7 +190,6 @@ function disableAdminMode(userId, autoDisabled = false) {
     
     console.log(`🔴 Admin mode DISABLED for user ${userId} ${autoDisabled ? '(auto)' : '(manual)'}`);
     
-    // Notify user that chatbot is back
     if (autoDisabled) {
       const lang = session.lastLang || 'en';
       const reactivationMsg = {
@@ -215,7 +261,6 @@ async function handleMessage(senderId, message) {
 
   const session = getUserSession(senderId);
 
-  // Check if user wants to talk to admin
   const talkToAdminKeywords = ['talk to admin', 'speak to admin', 'contact admin', 
                                 'magsalita sa admin', 'makipag-usap sa admin',
                                 'pakigsulti sa admin', 'gusto ko admin'];
@@ -230,37 +275,29 @@ async function handleMessage(senderId, message) {
     };
     
     sendTextMessage(senderId, adminModeMsg[session.lastLang] || adminModeMsg.en);
-    
-    // Set the inactivity timer
     updateAdminActivity(senderId);
     return;
   }
 
-  // If admin mode is active, just update activity and let admin handle it
   if (session.adminMode) {
     updateAdminActivity(senderId);
     console.log(`💬 Message from user ${senderId} in admin mode - chatbot paused`);
-    return; // Don't respond with chatbot
+    return;
   }
 
   try {
     sendTypingIndicator(senderId, true);
     console.log('📨 User message:', text);
 
-    if (!GEMINI_API_KEY) {
-      throw new Error('GEMINI_API_KEY not configured');
-    }
-
-    // Detect language from user's typed message
     const lang = detectLanguageFallback(text);
     session.lastLang = lang;
 
-    const geminiResponse = await queueGeminiRequest(text, session, lang);
-    console.log('🤖 Gemini response:', geminiResponse);
+    const response = await queueAIRequest(text, session, lang);
+    console.log('🤖 AI response:', response);
     
     session.conversationHistory.push({
       user: text,
-      bot: geminiResponse,
+      bot: response,
       timestamp: Date.now()
     });
 
@@ -269,7 +306,7 @@ async function handleMessage(senderId, message) {
     }
 
     sendTypingIndicator(senderId, false);
-    sendTextMessage(senderId, geminiResponse);
+    sendTextMessage(senderId, response);
 
     setTimeout(() => {
       sendMainMenu(senderId, lang);
@@ -290,33 +327,33 @@ async function handleMessage(senderId, message) {
   }
 }
 
-// Queue Gemini requests to handle rate limiting
-async function queueGeminiRequest(userMessage, session, lang) {
+// Queue AI requests with model fallback
+async function queueAIRequest(userMessage, session, lang) {
   return new Promise((resolve, reject) => {
     requestQueue.push({ userMessage, session, lang, resolve, reject });
     processQueue();
   });
 }
 
-// Process queued requests with rate limiting
+// Process queued requests with rate limiting and model switching
 async function processQueue() {
   if (isProcessingQueue || requestQueue.length === 0) return;
   
   isProcessingQueue = true;
   
   while (requestQueue.length > 0) {
-    // Reset counter every minute
+    const currentModel = getCurrentModel();
     const now = Date.now();
+    
     if (now - lastResetTime >= 60000) {
       requestCount = 0;
       lastResetTime = now;
       console.log('🔄 Rate limit counter reset');
     }
     
-    // Wait if we've hit the rate limit
-    if (requestCount >= MAX_REQUESTS_PER_MINUTE) {
+    if (requestCount >= currentModel.maxRequests) {
       const waitTime = 60000 - (now - lastResetTime);
-      console.log(`⏳ Rate limit reached. Waiting ${Math.ceil(waitTime / 1000)}s...`);
+      console.log(`⏳ Rate limit reached for ${currentModel.name}. Waiting ${Math.ceil(waitTime / 1000)}s...`);
       await new Promise(resolve => setTimeout(resolve, waitTime));
       requestCount = 0;
       lastResetTime = Date.now();
@@ -324,23 +361,31 @@ async function processQueue() {
     
     const request = requestQueue.shift();
     try {
-      const response = await getGeminiResponse(
+      const response = await getAIResponse(
         request.userMessage,
         request.session,
         request.lang
       );
       requestCount++;
-      console.log(`📊 Gemini requests: ${requestCount}/${MAX_REQUESTS_PER_MINUTE} this minute`);
+      console.log(`📊 AI requests: ${requestCount}/${currentModel.maxRequests} this minute (${currentModel.name})`);
+      
+      // Reset fail count on success
+      modelFailCount.set(currentModel.name, 0);
+      
       request.resolve(response);
     } catch (error) {
-      // If it's a rate limit error, put the request back in queue
-      if (error.message.includes('429') || error.message.includes('quota')) {
-        console.log('⚠️ Rate limit hit, requeueing request');
-        requestQueue.unshift(request); // Put back at front of queue
-        requestCount = MAX_REQUESTS_PER_MINUTE; // Force wait
-        await new Promise(resolve => setTimeout(resolve, 60000)); // Wait 1 minute
+      console.error(`❌ Error with ${currentModel.name}:`, error.message);
+      
+      // Track consecutive failures
+      const failCount = (modelFailCount.get(currentModel.name) || 0) + 1;
+      modelFailCount.set(currentModel.name, failCount);
+      
+      // If failed 3 times or quota error, switch model
+      if (error.message.includes('429') || error.message.includes('quota') || failCount >= 3) {
+        console.log(`⚠️ Switching from ${currentModel.name} due to ${failCount} failures`);
+        switchToNextModel();
+        requestQueue.unshift(request); // Retry with new model
         requestCount = 0;
-        lastResetTime = Date.now();
       } else {
         request.reject(error);
       }
@@ -350,29 +395,48 @@ async function processQueue() {
   isProcessingQueue = false;
 }
 
-async function getGeminiResponse(userMessage, session, detectedLang) {
+// Get AI response with model fallback
+async function getAIResponse(userMessage, session, detectedLang) {
+  const currentModel = getCurrentModel();
+  
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
-    
-    let conversationContext = '';
-    if (session.conversationHistory.length > 0) {
-      conversationContext = '\n\nRECENT CONVERSATION:\n';
-      session.conversationHistory.slice(-3).forEach(exchange => {
-        conversationContext += `User: ${exchange.user}\nMeddy: ${exchange.bot}\n`;
-      });
+    if (currentModel.type === 'gemini') {
+      return await getGeminiResponse(userMessage, session, detectedLang, currentModel.name);
+    } else if (currentModel.type === 'basic') {
+      return getBasicResponse(userMessage, session, detectedLang);
     }
+  } catch (error) {
+    console.error(`❌ ${currentModel.name} failed:`, error.message);
+    throw error;
+  }
+}
 
-    // Language instruction based on detected language
-    let languageInstruction = '';
-    if (detectedLang === 'ceb') {
-      languageInstruction = 'IMPORTANT: Respond in Bisaya/Cebuano language.';
-    } else if (detectedLang === 'tl') {
-      languageInstruction = 'IMPORTANT: Respond in Tagalog language.';
-    } else {
-      languageInstruction = 'IMPORTANT: Respond in English language.';
-    }
+// Gemini AI Response
+async function getGeminiResponse(userMessage, session, detectedLang, modelName) {
+  if (!GEMINI_API_KEY) {
+    throw new Error('GEMINI_API_KEY not configured');
+  }
 
-    const prompt = `You are Meddy, a helpful assistant for Saint Joseph College Clinic. When introducing yourself or when appropriate, mention that you are Meddy, the clinic chatbot.
+  const model = genAI.getGenerativeModel({ model: modelName });
+  
+  let conversationContext = '';
+  if (session.conversationHistory.length > 0) {
+    conversationContext = '\n\nRECENT CONVERSATION:\n';
+    session.conversationHistory.slice(-3).forEach(exchange => {
+      conversationContext += `User: ${exchange.user}\nMeddy: ${exchange.bot}\n`;
+    });
+  }
+
+  let languageInstruction = '';
+  if (detectedLang === 'ceb') {
+    languageInstruction = 'IMPORTANT: Respond in Bisaya/Cebuano language.';
+  } else if (detectedLang === 'tl') {
+    languageInstruction = 'IMPORTANT: Respond in Tagalog language.';
+  } else {
+    languageInstruction = 'IMPORTANT: Respond in English language.';
+  }
+
+  const prompt = `You are Meddy, a helpful assistant for Saint Joseph College Clinic. When introducing yourself or when appropriate, mention that you are Meddy, the clinic chatbot.
 
 ${languageInstruction}
 
@@ -443,12 +507,82 @@ User: ${userMessage}
 
 Respond in 2-4 sentences in ${detectedLang === 'ceb' ? 'Bisaya/Cebuano' : detectedLang === 'tl' ? 'Tagalog' : 'English'}. Be helpful, friendly, and use emojis appropriately. Base your answer ONLY on the clinic information above.`;
 
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    return response.text();
-  } catch (error) {
-    console.error('❌ Gemini API Error:', error.message);
-    throw error;
+  const result = await model.generateContent(prompt);
+  const response = await result.response;
+  return response.text();
+}
+
+// Basic Mode Response (keyword-based fallback)
+function getBasicResponse(userMessage, session, lang) {
+  const lowerMsg = userMessage.toLowerCase();
+  
+  const responses = {
+    en: {
+      greeting: "👋 Hi! I'm Meddy, your clinic assistant. I'm currently in basic mode. How can I help you with the clinic?",
+      location: "📍 The clinic is located on the Ground Floor beside the Theology Office. The dental clinic is at the Junior High School Department.",
+      hours: "🕐 Clinic Hours:\n- Monday-Friday: 8:00 AM – 5:00 PM\n- Saturday: 8:00 AM – 12:00 NN\n- Closed Sundays & holidays",
+      doctor: "👨‍⚕️ Doctor's Schedule:\n- Tuesday, Wednesday, Thursday: 9:00 AM - 12:00 NN\n- Outside these hours, students can still visit for basic care.",
+      dentist: "🦷 Dentist Schedule:\n- Mon-Fri: 8:30-11:30 AM & 1:30-4:30 PM\n- Saturday: 8:00-11:30 AM\n- 10 extraction slots per session",
+      medicines: "💊 Available Medicines (FREE):\n- Paracetamol, Dycolsen, Dycolgen, Loperamide, Erceflora, Antacid\n- Maximum 2 medicines per person\n- Parental consent required for minors",
+      extraction: "🦷 Tooth Extraction Process:\n1. Visit Main Campus Clinic\n2. Get referral slip\n3. Go to Dental Clinic at Junior High School\n4. Anesthesia is FREE!",
+      certificate: "📋 Medical certificates are issued for school excuses, fever, asthma attacks, and other verified illnesses.",
+      emergency: "🚨 Emergency Procedure:\n1. Inform teacher/staff\n2. Get escorted to clinic\n3. Receive first aid\n4. Hospital referral if needed",
+      referral: "🏥 Referral Hospital: Dongon Hospital\n- Emergency: Go directly\n- Regular: Visit clinic first for documentation",
+      default: "I'm in basic mode right now. Please choose from the menu below or type 'talk to admin' to speak with clinic staff."
+    },
+    tl: {
+      greeting: "👋 Kumusta! Ako si Meddy, ang clinic assistant. Nasa basic mode ako ngayon. Paano kita matutulungan sa clinic?",
+      location: "📍 Ang clinic ay matatagpuan sa Ground Floor beside the Theology Office. Ang dental clinic ay sa Junior High School Department.",
+      hours: "🕐 Oras ng Clinic:\n- Lunes-Biyernes: 8:00 AM – 5:00 PM\n- Sabado: 8:00 AM – 12:00 NN\n- Sarado tuwing Linggo at holiday",
+      doctor: "👨‍⚕️ Schedule ng Doktor:\n- Martes, Miyerkules, Huwebes: 9:00 AM - 12:00 NN\n- Pwede pa rin bisitahin ang clinic para sa basic care.",
+      dentist: "🦷 Schedule ng Dentista:\n- Lun-Biy: 8:30-11:30 AM & 1:30-4:30 PM\n- Sabado: 8:00-11:30 AM\n- 10 extraction slots per session",
+      medicines: "💊 Available na Gamot (LIBRE):\n- Paracetamol, Dycolsen, Dycolgen, Loperamide, Erceflora, Antacid\n- Maximum 2 gamot per tao\n- Kailangan ng consent ng magulang para sa menor de edad",
+      extraction: "🦷 Proseso ng Tooth Extraction:\n1. Pumunta sa Main Campus Clinic\n2. Kumuha ng referral slip\n3. Pumunta sa Dental Clinic sa Junior High School\n4. Anesthesia ay LIBRE!",
+      certificate: "📋 Ang medical certificate ay ibinibigay para sa school excuse, lagnat, asthma attack, at iba pang sakit.",
+      emergency: "🚨 Emergency Procedure:\n1. Sabihin sa teacher/staff\n2. Ihahatid sa clinic\n3. Makakatanggap ng first aid\n4. Hospital referral kung kailangan",
+      referral: "🏥 Referral Hospital: Dongon Hospital\n- Emergency: Diretso sa hospital\n- Regular: Bisitahin muna ang clinic",
+      default: "Nasa basic mode ako ngayon. Pumili sa menu sa ibaba o i-type ang 'talk to admin' para makipag-usap sa clinic staff."
+    },
+    ceb: {
+      greeting: "👋 Kumusta! Ako si Meddy, ang clinic assistant. Naa ko sa basic mode karon. Unsaon nako pagtabang nimo sa clinic?",
+      location: "📍 Ang clinic naa sa Ground Floor beside the Theology Office. Ang dental clinic naa sa Junior High School Department.",
+      hours: "🕐 Oras sa Clinic:\n- Lunes-Biyernes: 8:00 AM – 5:00 PM\n- Sabado: 8:00 AM – 12:00 NN\n- Sarado tuwing Domingo ug holiday",
+      doctor: "👨‍⚕️ Schedule sa Doktor:\n- Martes, Miyerkules, Huwebes: 9:00 AM - 12:00 NN\n- Pwede gihapon moduaw sa clinic para sa basic care.",
+      dentist: "🦷 Schedule sa Dentista:\n- Lun-Biy: 8:30-11:30 AM & 1:30-4:30 PM\n- Sabado: 8:00-11:30 AM\n- 10 extraction slots per session",
+      medicines: "💊 Available nga Tambal (LIBRE):\n- Paracetamol, Dycolsen, Dycolgen, Loperamide, Erceflora, Antacid\n- Maximum 2 ka tambal per tawo\n- Kinahanglan og consent sa ginikanan para sa menor de edad",
+      extraction: "🦷 Proseso sa Tooth Extraction:\n1. Adto sa Main Campus Clinic\n2. Kuha og referral slip\n3. Adto sa Dental Clinic sa Junior High School\n4. Anesthesia LIBRE!",
+      certificate: "📋 Ang medical certificate ihatag para sa school excuse, hilanat, asthma attack, ug uban pang sakit.",
+      emergency: "🚨 Emergency Procedure:\n1. Sulti sa teacher/staff\n2. Dad-on sa clinic\n3. Makadawat og first aid\n4. Hospital referral kung kinahanglan",
+      referral: "🏥 Referral Hospital: Dongon Hospital\n- Emergency: Direkta sa hospital\n- Regular: Duaw sa una sa clinic",
+      default: "Naa ko sa basic mode karon. Pili sa menu sa ubos o i-type ang 'talk to admin' para makigsulti sa clinic staff."
+    }
+  };
+
+  const langResponses = responses[lang] || responses.en;
+
+  // Keyword matching
+  if (/(hi|hello|hey|kumusta|kamusta)/i.test(lowerMsg)) {
+    return langResponses.greeting;
+  } else if (/(where|location|asa|saan|diin)/i.test(lowerMsg)) {
+    return langResponses.location;
+  } else if (/(hours|time|schedule|oras|oras)/i.test(lowerMsg) && !/(doctor|dentist|doktor|dentista)/i.test(lowerMsg)) {
+    return langResponses.hours;
+  } else if (/(doctor|doktor)/i.test(lowerMsg)) {
+    return langResponses.doctor;
+  } else if (/(dentist|dental|ngipon|bungo|dentista)/i.test(lowerMsg)) {
+    return langResponses.dentist;
+  } else if (/(medicine|gamot|tambal)/i.test(lowerMsg)) {
+    return langResponses.medicines;
+  } else if (/(extraction|bunot|tanggal|extract)/i.test(lowerMsg)) {
+    return langResponses.extraction;
+  } else if (/(certificate|certify)/i.test(lowerMsg)) {
+    return langResponses.certificate;
+  } else if (/(emergency|emerhensya|kadalian)/i.test(lowerMsg)) {
+    return langResponses.emergency;
+  } else if (/(referral|hospital|ospital)/i.test(lowerMsg)) {
+    return langResponses.referral;
+  } else {
+    return langResponses.default;
   }
 }
 
@@ -479,20 +613,17 @@ function handlePostback(senderId, postback) {
 
   console.log('📍 Postback payload:', payload);
 
-  // If admin mode is active, update activity
   if (session.adminMode) {
     updateAdminActivity(senderId);
-    return; // Don't respond with chatbot in admin mode
-  }
-
-  // Handle back to main menu
-  if (payload === 'MAIN_MENU') {
-    session.menuLevel = 'main';
-    sendMainMenu(senderId, 'en'); // Always English for menu
     return;
   }
 
-  // Handle talk to admin
+  if (payload === 'MAIN_MENU') {
+    session.menuLevel = 'main';
+    sendMainMenu(senderId, 'en');
+    return;
+  }
+
   if (payload === 'TALK_TO_ADMIN') {
     enableAdminMode(senderId);
     
@@ -503,7 +634,6 @@ function handlePostback(senderId, postback) {
     return;
   }
 
-  // Menu selections are always in English
   const messageMap = {
     'CLINIC_INFO': 'Tell me about clinic location and hours',
     'DOCTOR_SCHEDULE': 'When is the doctor available?',
@@ -518,7 +648,6 @@ function handlePostback(senderId, postback) {
 
   const simulatedMessage = messageMap[payload];
   if (simulatedMessage) {
-    // Force English for menu selections
     session.lastLang = 'en';
     handleMessage(senderId, { text: simulatedMessage });
   } else {
@@ -530,7 +659,6 @@ function handlePostback(senderId, postback) {
 function sendMainMenu(senderId, lang = 'en') {
   const session = getUserSession(senderId);
   
-  // Don't send menu if admin mode is active
   if (session && session.adminMode) {
     return;
   }
@@ -573,7 +701,6 @@ function sendTypingIndicator(senderId, isTyping) {
   }, {
     params: { access_token: PAGE_ACCESS_TOKEN }
   }).catch(error => {
-    // Silently handle typing indicator errors (user might have blocked)
     if (error.response?.data?.error?.code !== 100) {
       console.error('⚠️ Typing indicator error:', error.message);
     }
@@ -602,19 +729,16 @@ function sendMessage(senderId, message) {
     const errorCode = errorData?.code;
     const errorSubcode = errorData?.error_subcode;
     
-    // Handle "No matching user found" errors silently
     if (errorCode === 100 && errorSubcode === 2018001) {
       console.log(`⚠️ User ${senderId} not reachable (blocked/deleted/unsubscribed)`);
       return;
     }
     
-    // Handle other user-related errors
     if (errorCode === 100) {
       console.log(`⚠️ Cannot send to user ${senderId}: ${errorData?.message}`);
       return;
     }
     
-    // Log other errors normally
     console.error('❌ Error sending message:', errorData || error.message);
   });
 }
@@ -666,26 +790,65 @@ app.get('/admin/sessions', (req, res) => {
   res.json({ totalSessions: sessions.length, sessions });
 });
 
-// Health check endpoint
-app.get('/', (req, res) => {
-  res.send('✅ Meddy - Saint Joseph College Clinic Chatbot with Gemini AI is running! 🏥🤖');
+// Endpoint to check current AI model status
+app.get('/admin/ai-status', (req, res) => {
+  const currentModel = getCurrentModel();
+  res.json({
+    currentModel: currentModel.name,
+    modelType: currentModel.type,
+    requestCount: requestCount,
+    maxRequests: currentModel.maxRequests,
+    queueLength: requestQueue.length,
+    allModels: AI_MODELS.map(m => ({
+      name: m.name,
+      type: m.type,
+      enabled: m.enabled,
+      failCount: modelFailCount.get(m.name) || 0
+    }))
+  });
 });
 
-// Test Gemini endpoint
-app.get('/test-gemini', async (req, res) => {
+// Endpoint to manually switch AI model
+app.post('/admin/switch-model/:index', (req, res) => {
+  const index = parseInt(req.params.index);
+  if (index >= 0 && index < AI_MODELS.length) {
+    currentModelIndex = index;
+    requestCount = 0;
+    lastResetTime = Date.now();
+    const model = AI_MODELS[index];
+    console.log(`🔄 Manually switched to model: ${model.name}`);
+    res.json({ success: true, currentModel: model });
+  } else {
+    res.status(400).json({ success: false, error: 'Invalid model index' });
+  }
+});
+
+// Health check endpoint
+app.get('/', (req, res) => {
+  const currentModel = getCurrentModel();
+  res.send(`✅ Meddy - Saint Joseph College Clinic Chatbot is running! 🏥🤖\n\nCurrent AI Model: ${currentModel.name} (${currentModel.type})\nRequests: ${requestCount}/${currentModel.maxRequests} this minute`);
+});
+
+// Test AI endpoint
+app.get('/test-ai', async (req, res) => {
   const testMessage = req.query.message || 'When is the dentist available?';
+  const lang = req.query.lang || 'en';
   
   try {
     const session = {
       conversationHistory: [],
-      lastLang: 'en'
+      lastLang: lang
     };
     
-    const response = await getGeminiResponse(testMessage, session, 'en');
+    const response = await getAIResponse(testMessage, session, lang);
+    const currentModel = getCurrentModel();
+    
     res.json({
       success: true,
       userMessage: testMessage,
-      geminiResponse: response
+      aiResponse: response,
+      currentModel: currentModel.name,
+      modelType: currentModel.type
     });
   } catch (error) {
     res.status(500).json({
@@ -695,9 +858,16 @@ app.get('/test-gemini', async (req, res) => {
   }
 });
 
-// Check available models
+// Check available Gemini models
 app.get('/test-models', async (req, res) => {
   try {
+    if (!GEMINI_API_KEY) {
+      return res.status(400).json({
+        success: false,
+        error: 'GEMINI_API_KEY not configured'
+      });
+    }
+
     const response = await axios.get(
       'https://generativelanguage.googleapis.com/v1beta/models',
       {
@@ -707,7 +877,11 @@ app.get('/test-models', async (req, res) => {
     
     const modelNames = response.data.models
       .filter(m => m.supportedGenerationMethods.includes('generateContent'))
-      .map(m => m.name);
+      .map(m => ({
+        name: m.name.replace('models/', ''),
+        displayName: m.displayName,
+        description: m.description
+      }));
     
     res.json({
       success: true,
@@ -724,7 +898,10 @@ app.get('/test-models', async (req, res) => {
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
+  const currentModel = getCurrentModel();
   console.log(`🚀 Server is running on port ${PORT}`);
-  console.log(`🤖 Gemini AI integration: ${GEMINI_API_KEY ? 'ENABLED ✅' : 'DISABLED ❌ - Add GEMINI_API_KEY to enable'}`);
-  console.log(`⏱️  Rate limit: ${MAX_REQUESTS_PER_MINUTE} requests per minute`);
+  console.log(`🤖 AI integration: ${GEMINI_API_KEY ? 'ENABLED ✅' : 'BASIC MODE ONLY ⚠️'}`);
+  console.log(`🔧 Current AI Model: ${currentModel.name} (${currentModel.type})`);
+  console.log(`⏱️  Rate limit: ${currentModel.maxRequests} requests per minute`);
+  console.log(`📊 Available models: ${AI_MODELS.map(m => m.name).join(', ')}`);
 });
