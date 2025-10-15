@@ -18,19 +18,25 @@ const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 // AI Model Configuration with multiple fallbacks
 const AI_MODELS = [
   {
-    name: 'gemini-1.5-flash',
+    name: 'gemini-2.5-flash',      // ✅ FREE - Best option
     type: 'gemini',
     maxRequests: 15,
     enabled: true
   },
   {
-    name: 'gemini-1.5-pro',
+    name: 'gemini-2.5-flash-lite', // ✅ FREE - Faster, lighter
     type: 'gemini',
-    maxRequests: 2,
+    maxRequests: 15,
     enabled: true
   },
   {
-    name: 'basic',
+    name: 'gemini-2.0-flash-001',  // ✅ FREE - Backup
+    type: 'gemini',
+    maxRequests: 15,
+    enabled: true
+  },
+  {
+    name: 'basic',                  // ✅ FREE - Always available
     type: 'basic',
     maxRequests: 999,
     enabled: true
