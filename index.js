@@ -130,13 +130,16 @@ function getUserSession(userId) {
       menuLevel: 'main',
       adminMode: false,
       lastAdminActivity: null,
-      adminInactivityTimer: null
+      adminInactivityTimer: null,
+      goodbyeSent: false,
+      hasIntroduced: false
     });
   }
   
   const session = userSessions.get(userId);
   session.lastInteraction = Date.now();
   session.conversationCount++;
+  session.goodbyeSent = false; // Reset goodbye flag on new interaction
   
   return session;
 }
@@ -199,10 +202,29 @@ function disableAdminMode(userId, autoDisabled = false) {
   }
 }
 
+// Check for user inactivity and send thank you message
 setInterval(() => {
   const now = Date.now();
+  const INACTIVITY_THRESHOLD = 15 * 60 * 1000; // 15 minutes
+  
   for (const [userId, session] of userSessions.entries()) {
-    if (now - session.lastInteraction > 1800000) {
+    const inactiveDuration = now - session.lastInteraction;
+    
+    // Send goodbye message after 15 minutes of inactivity
+    if (inactiveDuration >= INACTIVITY_THRESHOLD && inactiveDuration < INACTIVITY_THRESHOLD + 300000 && !session.goodbyeSent) {
+      const lang = session.lastLang || 'en';
+      const inactivityMsg = {
+        en: "Thank you for messaging the Saint Joseph College Clinic! 😊\n\nIf you need any assistance in the future, feel free to message us anytime. Stay healthy and take care! 👋",
+        tl: "Salamat sa pag-message sa Saint Joseph College Clinic! 😊\n\nKung kailangan mo ng tulong sa hinaharap, mag-message ka lang anytime. Mag-ingat ka! 👋",
+        ceb: "Salamat sa pag-message sa Saint Joseph College Clinic! 😊\n\nKung kinahanglan nimo og tabang sa umaabot, message lang anytime. Pag-amping! 👋"
+      };
+      sendTextMessage(userId, inactivityMsg[lang] || inactivityMsg.en);
+      session.goodbyeSent = true;
+      console.log(`👋 Sent goodbye message to inactive user ${userId}`);
+    }
+    
+    // Clean up old sessions after 30 minutes
+    if (inactiveDuration > 1800000) {
       if (session.adminInactivityTimer) {
         clearTimeout(session.adminInactivityTimer);
       }
@@ -210,7 +232,7 @@ setInterval(() => {
       console.log(`🧹 Cleaned up old session for user ${userId}`);
     }
   }
-}, 300000);
+}, 60000); // Check every minute
 
 app.get('/webhook', (req, res) => {
   const mode = req.query['hub.mode'];
@@ -250,6 +272,21 @@ async function handleMessage(senderId, message) {
   if (!text) return;
 
   const session = getUserSession(senderId);
+
+  // Check for thank you / goodbye messages
+  const thankYouKeywords = ['thank', 'thanks', 'salamat', 'salamat kaayo', 'thank you', 'ty'];
+  const goodbyeKeywords = ['bye', 'goodbye', 'see you', 'paalam', 'sige', 'adios', 'hangtod'];
+  
+  if (thankYouKeywords.some(keyword => text.toLowerCase().includes(keyword)) || 
+      goodbyeKeywords.some(keyword => text.toLowerCase().includes(keyword))) {
+    const farewellMsg = {
+      en: "You're welcome! Thank you for messaging the Saint Joseph College Clinic. Stay healthy! 😊\n\nFeel free to reach out anytime you need assistance. Take care! 👋",
+      tl: "Walang anuman! Salamat sa pag-message sa Saint Joseph College Clinic. Mag-ingat ka! 😊\n\nBumalik ka lang kung kailangan mo ng tulong. Ingat! 👋",
+      ceb: "Walay sapayan! Salamat sa pag-message sa Saint Joseph College Clinic. Pag-amping! 😊\n\nBalik lang kung kinahanglan nimo og tabang. Amping! 👋"
+    };
+    sendTextMessage(senderId, farewellMsg[session.lastLang] || farewellMsg.en);
+    return;
+  }
 
   const talkToAdminKeywords = ['talk to admin', 'speak to admin', 'contact admin', 
                                 'magsalita sa admin', 'makipag-usap sa admin',
@@ -495,7 +532,7 @@ Respond in 2-4 sentences in ${detectedLang === 'ceb' ? 'Bisaya/Cebuano' : detect
   return response.text();
 }
 
-// Basic Mode Response (keyword-based fallback) - FIXED VERSION
+// Basic Mode Response (keyword-based fallback)
 function getBasicResponse(userMessage, session, lang) {
   const lowerMsg = userMessage.toLowerCase();
   
@@ -503,7 +540,7 @@ function getBasicResponse(userMessage, session, lang) {
     en: {
       greeting: "👋 Hi! I'm Meddy, your clinic assistant. How can I help you today?",
       location: "📍 The clinic is located on the Ground Floor beside the Theology Office. The dental clinic is at the Junior High School Department.",
-      hours: "🕐 Clinic Hours:\n- Monday-Friday: 8:00 AM – 5:00 PM\n- Saturday: 8:00 AM – 12:00 NN\n- Closed Sundays & holidays",
+      hours: "🕐 Clinic Hours:\n• Monday-Friday: 8:00 AM – 5:00 PM\n• Saturday: 8:00 AM – 12:00 NN (half-day)\n• Closed on Sundays and holidays",
       doctor: "👨‍⚕️ Doctor's Schedule:\n- Tuesday, Wednesday, Thursday: 9:00 AM - 12:00 NN\n- Outside these hours, students can still visit for basic care.",
       dentist: "🦷 Dentist Schedule:\n- Mon-Fri: 8:30-11:30 AM & 1:30-4:30 PM\n- Saturday: 8:00-11:30 AM\n- 10 extraction slots per session\n- FREE anesthesia during extraction",
       medicines: "💊 Available Medicines (FREE):\n- Paracetamol, Dycolsen, Dycolgen, Loperamide, Erceflora, Antacid\n- Maximum 2 medicines per person\n- Parental consent required for minors",
@@ -517,7 +554,7 @@ function getBasicResponse(userMessage, session, lang) {
     tl: {
       greeting: "👋 Kumusta! Ako si Meddy, ang clinic assistant. Paano kita matutulungan ngayon?",
       location: "📍 Ang clinic ay matatagpuan sa Ground Floor beside the Theology Office. Ang dental clinic ay sa Junior High School Department.",
-      hours: "🕐 Oras ng Clinic:\n- Lunes-Biyernes: 8:00 AM – 5:00 PM\n- Sabado: 8:00 AM – 12:00 NN\n- Sarado tuwing Linggo at holiday",
+      hours: "🕐 Oras ng Clinic:\n• Lunes-Biyernes: 8:00 AM – 5:00 PM\n• Sabado: 8:00 AM – 12:00 NN (half-day)\n• Sarado tuwing Linggo at holiday",
       doctor: "👨‍⚕️ Schedule ng Doktor:\n- Martes, Miyerkules, Huwebes: 9:00 AM - 12:00 NN\n- Pwede pa rin bisitahin ang clinic para sa basic care.",
       dentist: "🦷 Schedule ng Dentista:\n- Lun-Biy: 8:30-11:30 AM & 1:30-4:30 PM\n- Sabado: 8:00-11:30 AM\n- 10 extraction slots per session\n- LIBRE ang anesthesia",
       medicines: "💊 Available na Gamot (LIBRE):\n- Paracetamol, Dycolsen, Dycolgen, Loperamide, Erceflora, Antacid\n- Maximum 2 gamot per tao\n- Kailangan ng consent ng magulang para sa menor de edad",
@@ -531,7 +568,7 @@ function getBasicResponse(userMessage, session, lang) {
     ceb: {
       greeting: "👋 Kumusta! Ako si Meddy, ang clinic assistant. Unsaon nako pagtabang nimo?",
       location: "📍 Ang clinic naa sa Ground Floor beside the Theology Office. Ang dental clinic naa sa Junior High School Department.",
-      hours: "🕐 Oras sa Clinic:\n- Lunes-Biyernes: 8:00 AM – 5:00 PM\n- Sabado: 8:00 AM – 12:00 NN\n- Sarado tuwing Domingo ug holiday",
+      hours: "🕐 Oras sa Clinic:\n• Lunes-Biyernes: 8:00 AM – 5:00 PM\n• Sabado: 8:00 AM – 12:00 NN (half-day)\n• Sarado tuwing Domingo ug holiday",
       doctor: "👨‍⚕️ Schedule sa Doktor:\n- Martes, Miyerkules, Huwebes: 9:00 AM - 12:00 NN\n- Pwede gihapon moduaw sa clinic para sa basic care.",
       dentist: "🦷 Schedule sa Dentista:\n- Lun-Biy: 8:30-11:30 AM & 1:30-4:30 PM\n- Sabado: 8:00-11:30 AM\n- 10 extraction slots per session\n- LIBRE ang anesthesia",
       medicines: "💊 Available nga Tambal (LIBRE):\n- Paracetamol, Dycolsen, Dycolgen, Loperamide, Erceflora, Antacid\n- Maximum 2 ka tambal per tawo\n- Kinahanglan og consent sa ginikanan para sa menor de edad",
@@ -668,18 +705,25 @@ function sendMainMenu(senderId, lang = 'en') {
     return;
   }
 
-  const menuText = "🏥 Saint Joseph College Clinic\n👋 Hi! I'm Meddy, your clinic assistant!\n\nChoose a category below:";
+  // Only introduce on first interaction
+  let menuText;
+  if (!session.hasIntroduced) {
+    menuText = "🏥 *Saint Joseph College Clinic*\n👋 Hi! I'm Meddy, your clinic assistant!\n\nHow can I help you today?";
+    session.hasIntroduced = true;
+  } else {
+    menuText = "How can I help you today?";
+  }
 
   const quickReplies = [
-    { title: "📍 Clinic Info & Hours", payload: "CLINIC_INFO" },
-    { title: "👨‍⚕️ Doctor's Schedule", payload: "DOCTOR_SCHEDULE" },
-    { title: "🦷 Dental Services", payload: "DENTAL_SERVICES" },
+    { title: "📍 Clinic Info", payload: "CLINIC_INFO" },
+    { title: "👨‍⚕️ Doctor", payload: "DOCTOR_SCHEDULE" },
+    { title: "🦷 Dentist", payload: "DENTAL_SERVICES" },
     { title: "💊 Medicines", payload: "MEDICINES" },
-    { title: "📋 Medical Certificates", payload: "CERTIFICATES" },
-    { title: "🏥 Referrals & Hospitals", payload: "REFERRALS" },
-    { title: "🚨 Emergency & First Aid", payload: "EMERGENCY" },
-    { title: "✨ Other Services", payload: "OTHER_SERVICES" },
-    { title: "👨‍💼 Talk to Admin", payload: "TALK_TO_ADMIN" }
+    { title: "📋 Certificates", payload: "CERTIFICATES" },
+    { title: "🏥 Referrals", payload: "REFERRALS" },
+    { title: "🚨 Emergency", payload: "EMERGENCY" },
+    { title: "✨ Services", payload: "OTHER_SERVICES" },
+    { title: "👨‍💼 Talk to Staff", payload: "TALK_TO_ADMIN" }
   ];
 
   const formattedReplies = quickReplies.map(item => ({
