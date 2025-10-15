@@ -12,41 +12,21 @@ const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-// Initialize Gemini AI
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
-// AI Model Configuration with multiple fallbacks
 const AI_MODELS = [
-  {
-    name: 'gemini-1.5-flash',
-    type: 'gemini',
-    maxRequests: 15,
-    enabled: true
-  },
-  {
-    name: 'gemini-1.5-pro',
-    type: 'gemini',
-    maxRequests: 2,
-    enabled: true
-  },
-  {
-    name: 'basic',
-    type: 'basic',
-    maxRequests: 999,
-    enabled: true
-  }
+  { name: 'gemini-1.5-flash', type: 'gemini', maxRequests: 15, enabled: true },
+  { name: 'gemini-1.5-pro', type: 'gemini', maxRequests: 2, enabled: true },
+  { name: 'basic', type: 'basic', maxRequests: 999, enabled: true }
 ];
 
 let currentModelIndex = 0;
 let modelFailCount = new Map();
-
-// Rate limiting for AI API
 const requestQueue = [];
 let isProcessingQueue = false;
 let requestCount = 0;
 let lastResetTime = Date.now();
 
-// Saint Joseph College Clinic Information
 const CLINIC_INFO = {
   location: {
     main: 'Ground Floor beside the Theology Office',
@@ -59,37 +39,27 @@ const CLINIC_INFO = {
   },
   dentist: {
     schedule: 'Mon-Fri: 8:30-11:30 AM & 1:30-4:30 PM (10 slots per session), Sat: 8:00-11:30 AM',
-    extraction_process: 'Get referral from Main Campus clinic → Go to Junior High School dental office for tooth extraction',
+    extraction_process: 'Get referral from Main Campus clinic → Go to Junior High School dental office',
     anesthesia: 'FREE during tooth extraction'
   },
   doctor: {
     schedule: 'Tuesday, Wednesday, Thursday: 9:00 AM - 12:00 NN',
-    outside_hours: 'Students can visit for basic care and first aid. Serious cases will receive referral slips.'
+    outside_hours: 'Students can visit for basic care and first aid'
   },
   medicines: {
     available: ['Paracetamol', 'Dycolsen', 'Dycolgen', 'Loperamide', 'Erceflora', 'Antacid'],
     limit: 'Maximum 2 medicines per person',
-    type: 'Over-the-counter medicines, no prescription required',
-    parental_consent: 'Required for minors before dispensing medicine',
-    prescription: 'Prescription medicines require valid doctor prescription'
+    parental_consent: 'Required for minors'
   },
   certificates: {
-    issued_for: ['School excuse', 'Fever', 'Asthma attacks', 'Other verified illness'],
-    requirement: 'Valid medical reasons confirmed by clinic staff'
+    issued_for: ['School excuse', 'Fever', 'Asthma attacks', 'Other verified illness']
   },
   referral: {
-    hospital: 'Dongon Hospital',
-    emergency: 'Can go directly to hospital',
-    regular: 'Visit clinic first for proper documentation',
-    refusal_slip: 'Given when clinic cannot accommodate'
+    hospital: 'Dongon Hospital'
   },
   services: {
-    all_free: 'All basic services and common medicines are FREE for enrolled students',
-    includes: ['First aid treatment', 'Chronic condition monitoring', 'Hospital referrals', 'Health counseling', 'Preventive care tips']
-  },
-  emergency: {
-    procedure: 'Inform teacher/staff → Escorted to clinic → First aid → Hospital referral if needed',
-    handles: ['Injuries', 'Fainting', 'Fever', 'Asthma attacks', 'Other urgent conditions']
+    all_free: 'All basic services FREE for enrolled students',
+    includes: ['First aid', 'Monitoring', 'Referrals', 'Counseling', 'Preventive care']
   }
 };
 
@@ -102,35 +72,33 @@ function switchToNextModel() {
   do {
     currentModelIndex = (currentModelIndex + 1) % AI_MODELS.length;
     const model = AI_MODELS[currentModelIndex];
-    
     if (model.enabled) {
-      console.log(`🔄 Switched to model: ${model.name} (${model.type})`);
+      console.log(`🔄 Switched to: ${model.name}`);
       requestCount = 0;
       lastResetTime = Date.now();
       return model;
     }
   } while (currentModelIndex !== startIndex);
-  
   currentModelIndex = AI_MODELS.findIndex(m => m.type === 'basic');
-  console.log('⚠️ All AI models unavailable, using basic mode');
   return AI_MODELS[currentModelIndex];
 }
 
 const userSessions = new Map();
 const ADMIN_INACTIVE_TIMEOUT = 15 * 60 * 1000;
+const USER_INACTIVE_TIMEOUT = 15 * 60 * 1000;
 
 function getUserSession(userId) {
   if (!userSessions.has(userId)) {
     userSessions.set(userId, {
       conversationHistory: [],
-      lastIntent: null,
       lastLang: 'en',
       conversationCount: 0,
       lastInteraction: Date.now(),
-      menuLevel: 'main',
       adminMode: false,
       lastAdminActivity: null,
-      adminInactivityTimer: null
+      adminInactivityTimer: null,
+      hasSeenIntro: false,
+      inactivityTimer: null
     });
   }
   
@@ -138,7 +106,29 @@ function getUserSession(userId) {
   session.lastInteraction = Date.now();
   session.conversationCount++;
   
+  if (session.inactivityTimer) {
+    clearTimeout(session.inactivityTimer);
+  }
+  
+  session.inactivityTimer = setTimeout(() => {
+    sendInactivityThankYou(userId);
+  }, USER_INACTIVE_TIMEOUT);
+  
   return session;
+}
+
+function sendInactivityThankYou(userId) {
+  const session = userSessions.get(userId);
+  if (!session || session.adminMode) return;
+  
+  const thankYouMessages = {
+    en: "Thank you for reaching out! 😊\n\nIf you need assistance with the clinic, feel free to message us anytime. We're here to help!\n\nHave a great day! 🌟",
+    tl: "Salamat sa pag-message! 😊\n\nKung kailangan mo ng tulong, mag-message ka lang anytime. Nandito kami!\n\nMagandang araw! 🌟",
+    ceb: "Salamat sa pag-message! 😊\n\nKung kinahanglan nimo og tabang, message lang anytime. Naa mi dinhi!\n\nMaayong adlaw! 🌟"
+  };
+  
+  sendTextMessage(userId, thankYouMessages[session.lastLang || 'en']);
+  console.log(`⏰ Sent thank you to user ${userId}`);
 }
 
 function enableAdminMode(userId) {
@@ -146,11 +136,16 @@ function enableAdminMode(userId) {
   session.adminMode = true;
   session.lastAdminActivity = Date.now();
   
+  if (session.inactivityTimer) {
+    clearTimeout(session.inactivityTimer);
+    session.inactivityTimer = null;
+  }
+  
   if (session.adminInactivityTimer) {
     clearTimeout(session.adminInactivityTimer);
   }
   
-  console.log(`✅ Admin mode ENABLED for user ${userId}`);
+  console.log(`✅ Admin mode ON for ${userId}`);
 }
 
 function updateAdminActivity(userId) {
@@ -165,8 +160,6 @@ function updateAdminActivity(userId) {
     session.adminInactivityTimer = setTimeout(() => {
       disableAdminMode(userId, true);
     }, ADMIN_INACTIVE_TIMEOUT);
-    
-    console.log(`🔄 Admin activity updated for user ${userId}`);
   }
 }
 
@@ -181,20 +174,17 @@ function disableAdminMode(userId, autoDisabled = false) {
       session.adminInactivityTimer = null;
     }
     
-    console.log(`🔴 Admin mode DISABLED for user ${userId} ${autoDisabled ? '(auto)' : '(manual)'}`);
+    console.log(`🔴 Admin mode OFF for ${userId} ${autoDisabled ? '(auto)' : ''}`);
     
     if (autoDisabled) {
-      const lang = session.lastLang || 'en';
       const reactivationMsg = {
-        en: "🤖 Meddy is now active again! Feel free to ask me questions about the clinic, or type 'talk to admin' if you need to speak with a staff member.",
-        tl: "🤖 Si Meddy ay aktibo na ulit! Magtanong ka tungkol sa clinic, o i-type ang 'talk to admin' kung kailangan mo ng staff.",
-        ceb: "🤖 Si Meddy aktibo na usab! Pangutana ko bahin sa clinic, o i-type ang 'talk to admin' kung kinahanglan mo ang staff."
+        en: "Thank you for your patience! 😊\n\nMeddy is active again. How can I assist you?",
+        tl: "Salamat sa pasensya! 😊\n\nSi Meddy aktibo na. Paano kita matutulungan?",
+        ceb: "Salamat sa pailob! 😊\n\nSi Meddy aktibo na. Unsaon nako pagtabang?"
       };
       
-      sendTextMessage(userId, reactivationMsg[lang] || reactivationMsg.en);
-      setTimeout(() => {
-        sendMainMenu(userId, lang);
-      }, 1000);
+      sendTextMessage(userId, reactivationMsg[session.lastLang || 'en']);
+      setTimeout(() => sendMainMenu(userId, session.lastLang, true), 1000);
     }
   }
 }
@@ -203,11 +193,10 @@ setInterval(() => {
   const now = Date.now();
   for (const [userId, session] of userSessions.entries()) {
     if (now - session.lastInteraction > 1800000) {
-      if (session.adminInactivityTimer) {
-        clearTimeout(session.adminInactivityTimer);
-      }
+      if (session.adminInactivityTimer) clearTimeout(session.adminInactivityTimer);
+      if (session.inactivityTimer) clearTimeout(session.inactivityTimer);
       userSessions.delete(userId);
-      console.log(`🧹 Cleaned up old session for user ${userId}`);
+      console.log(`🧹 Cleaned session ${userId}`);
     }
   }
 }, 300000);
@@ -253,15 +242,15 @@ async function handleMessage(senderId, message) {
 
   const talkToAdminKeywords = ['talk to admin', 'speak to admin', 'contact admin', 
                                 'magsalita sa admin', 'makipag-usap sa admin',
-                                'pakigsulti sa admin', 'gusto ko admin'];
+                                'pakigsulti sa admin'];
   
-  if (talkToAdminKeywords.some(keyword => text.toLowerCase().includes(keyword))) {
+  if (talkToAdminKeywords.some(kw => text.toLowerCase().includes(kw))) {
     enableAdminMode(senderId);
     
     const adminModeMsg = {
-      en: "👨‍💼 Admin mode activated! A clinic staff member has been notified and will respond to you shortly. Meddy is now paused.\n\n(Meddy will automatically reactivate after 15 minutes of admin inactivity)",
-      tl: "👨‍💼 Admin mode activated! Aabisuhan ang clinic staff at sasagutin ka nila. Si Meddy ay naka-pause na.\n\n(Si Meddy ay babalik pagkatapos ng 15 minuto ng walang admin activity)",
-      ceb: "👨‍💼 Admin mode activated! Pahibaw-an ang clinic staff ug tubagon ka nila. Si Meddy gi-pause na.\n\n(Si Meddy mobalik human sa 15 minuto nga walay admin activity)"
+      en: "Our customer support team has received your concern and will get back to you as soon as possible. 😊\n\nYour patience means a lot to us. 🙏",
+      tl: "Natanggap na ng support team ang concern mo at tutugon sa lalong madaling panahon. 😊\n\nSalamat sa pasensya! 🙏",
+      ceb: "Nadawat na sa support team ang concern nimo ug motubag dayon. 😊\n\nSalamat sa pailob! 🙏"
     };
     
     sendTextMessage(senderId, adminModeMsg[session.lastLang] || adminModeMsg.en);
@@ -271,49 +260,50 @@ async function handleMessage(senderId, message) {
 
   if (session.adminMode) {
     updateAdminActivity(senderId);
-    console.log(`💬 Message from user ${senderId} in admin mode - chatbot paused`);
+    console.log(`💬 Admin mode active for ${senderId}`);
     return;
   }
 
   try {
     sendTypingIndicator(senderId, true);
-    console.log('📨 User message:', text);
-
     const lang = detectLanguageFallback(text);
     session.lastLang = lang;
 
-    const response = await queueAIRequest(text, session, lang);
-    console.log('🤖 AI response:', response);
-    
-    session.conversationHistory.push({
-      user: text,
-      bot: response,
-      timestamp: Date.now()
-    });
+    if (!session.hasSeenIntro) {
+      const introMessages = {
+        en: "Hello! 👋 I'm Meddy, the Saint Joseph College Clinic chatbot. How can I help you today? 😊",
+        tl: "Kumusta! 👋 Ako si Meddy, ang chatbot ng clinic. Paano kita matutulungan? 😊",
+        ceb: "Kumusta! 👋 Ako si Meddy, ang chatbot sa clinic. Unsaon nako pagtabang? 😊"
+      };
+      
+      sendTextMessage(senderId, introMessages[lang]);
+      session.hasSeenIntro = true;
+      await new Promise(resolve => setTimeout(resolve, 1500));
+    }
 
+    const response = await queueAIRequest(text, session, lang);
+    
+    session.conversationHistory.push({ user: text, bot: response, timestamp: Date.now() });
     if (session.conversationHistory.length > 5) {
       session.conversationHistory = session.conversationHistory.slice(-5);
     }
 
     sendTypingIndicator(senderId, false);
     sendTextMessage(senderId, response);
-
-    setTimeout(() => {
-      sendMainMenu(senderId, lang);
-    }, 1500);
+    setTimeout(() => sendMainMenu(senderId, lang, false), 1500);
 
   } catch (error) {
     console.error('❌ ERROR:', error.message);
     sendTypingIndicator(senderId, false);
     
     const errorMsg = session.lastLang === 'tl' 
-      ? '⚠️ Pasensya na, may problema sa sistema. Pakisubukan ulit.'
+      ? '⚠️ May problema sa sistema. Subukan ulit.'
       : session.lastLang === 'ceb'
-      ? '⚠️ Pasensya na, naa problema sa sistema. Palihug suway-i usab.'
-      : '⚠️ Sorry, I encountered an error. Please try again.';
+      ? '⚠️ Naa problema. Suway-i usab.'
+      : '⚠️ Error occurred. Please try again.';
     
     sendTextMessage(senderId, errorMsg);
-    setTimeout(() => sendMainMenu(senderId, session.lastLang || 'en'), 1000);
+    setTimeout(() => sendMainMenu(senderId, session.lastLang || 'en', false), 1000);
   }
 }
 
@@ -336,12 +326,10 @@ async function processQueue() {
     if (now - lastResetTime >= 60000) {
       requestCount = 0;
       lastResetTime = now;
-      console.log('🔄 Rate limit counter reset');
     }
     
     if (requestCount >= currentModel.maxRequests) {
       const waitTime = 60000 - (now - lastResetTime);
-      console.log(`⏳ Rate limit reached for ${currentModel.name}. Waiting ${Math.ceil(waitTime / 1000)}s...`);
       await new Promise(resolve => setTimeout(resolve, waitTime));
       requestCount = 0;
       lastResetTime = Date.now();
@@ -349,25 +337,15 @@ async function processQueue() {
     
     const request = requestQueue.shift();
     try {
-      const response = await getAIResponse(
-        request.userMessage,
-        request.session,
-        request.lang
-      );
+      const response = await getAIResponse(request.userMessage, request.session, request.lang);
       requestCount++;
-      console.log(`📊 AI requests: ${requestCount}/${currentModel.maxRequests} this minute (${currentModel.name})`);
-      
       modelFailCount.set(currentModel.name, 0);
-      
       request.resolve(response);
     } catch (error) {
-      console.error(`❌ Error with ${currentModel.name}:`, error.message);
-      
       const failCount = (modelFailCount.get(currentModel.name) || 0) + 1;
       modelFailCount.set(currentModel.name, failCount);
       
-      if (error.message.includes('429') || error.message.includes('quota') || failCount >= 3) {
-        console.log(`⚠️ Switching from ${currentModel.name} due to ${failCount} failures`);
+      if (error.message.includes('429') || failCount >= 3) {
         switchToNextModel();
         requestQueue.unshift(request);
         requestCount = 0;
@@ -383,230 +361,132 @@ async function processQueue() {
 async function getAIResponse(userMessage, session, detectedLang) {
   const currentModel = getCurrentModel();
   
-  try {
-    if (currentModel.type === 'gemini') {
-      return await getGeminiResponse(userMessage, session, detectedLang, currentModel.name);
-    } else if (currentModel.type === 'basic') {
-      return getBasicResponse(userMessage, session, detectedLang);
-    }
-  } catch (error) {
-    console.error(`❌ ${currentModel.name} failed:`, error.message);
-    throw error;
+  if (currentModel.type === 'gemini') {
+    return await getGeminiResponse(userMessage, session, detectedLang, currentModel.name);
+  } else {
+    return getBasicResponse(userMessage, session, detectedLang);
   }
 }
 
 async function getGeminiResponse(userMessage, session, detectedLang, modelName) {
-  if (!GEMINI_API_KEY) {
-    throw new Error('GEMINI_API_KEY not configured');
-  }
+  if (!GEMINI_API_KEY) throw new Error('GEMINI_API_KEY not configured');
 
   const model = genAI.getGenerativeModel({ model: modelName });
   
   let conversationContext = '';
   if (session.conversationHistory.length > 0) {
     conversationContext = '\n\nRECENT CONVERSATION:\n';
-    session.conversationHistory.slice(-3).forEach(exchange => {
-      conversationContext += `User: ${exchange.user}\nMeddy: ${exchange.bot}\n`;
+    session.conversationHistory.slice(-3).forEach(ex => {
+      conversationContext += `User: ${ex.user}\nMeddy: ${ex.bot}\n`;
     });
   }
 
-  let languageInstruction = '';
-  if (detectedLang === 'ceb') {
-    languageInstruction = 'IMPORTANT: Respond in Bisaya/Cebuano language.';
-  } else if (detectedLang === 'tl') {
-    languageInstruction = 'IMPORTANT: Respond in Tagalog language.';
-  } else {
-    languageInstruction = 'IMPORTANT: Respond in English language.';
-  }
+  const languageInstruction = detectedLang === 'ceb' 
+    ? 'Respond in Bisaya/Cebuano.' 
+    : detectedLang === 'tl' 
+    ? 'Respond in Tagalog.' 
+    : 'Respond in English.';
 
-  const prompt = `You are Meddy, a helpful assistant for Saint Joseph College Clinic. When introducing yourself or when appropriate, mention that you are Meddy, the clinic chatbot.
+  const prompt = `You are Meddy, Saint Joseph College Clinic assistant. DO NOT introduce yourself in every response.
 
 ${languageInstruction}
 
-CLINIC INFORMATION:
-
-LOCATION:
-- Main Campus Clinic: Ground Floor beside the Theology Office
-- Dental Clinic: Junior High School Department, near the medical clinic
-
-OPERATING HOURS:
-- Monday–Friday: 8:00 AM – 5:00 PM
-- Saturday: 8:00 AM – 12:00 NN (half-day)
-- Closed on Sundays and holidays
-
-DENTIST SCHEDULE:
-- Monday–Friday: 8:30–11:30 AM and 1:30–4:30 PM (10 extraction slots per session)
-- Saturday: 8:00–11:30 AM (half-day)
-- Anesthesia is FREE during tooth extraction
-
-DOCTOR SCHEDULE:
-- Tuesday, Wednesday, Thursday: 9:00 AM – 12:00 NN
-- Outside doctor's hours: Students can still visit for basic care and first aid
-- Serious cases receive referral slips to hospitals
-
-TOOTH EXTRACTION PROCESS:
-1. Go to Main Campus Clinic first
-2. Get referral slip (issued same day)
-3. Go to Dentist's Clinic at Junior High School Department
-4. Bring referral slip for same-day extraction (subject to slot availability)
-5. Follow post-care instructions after extraction
-6. Parental consent required for minors
-
-AVAILABLE MEDICINES (Over-the-counter, no prescription needed):
-- Paracetamol, Dycolsen, Dycolgen, Loperamide, Erceflora, Antacid
-- Limit: Maximum 2 medicines per person
-- Parental consent required for minors
-- Prescription medicines require valid doctor's prescription
-
-MEDICAL CERTIFICATES:
-- Issued for: School excuse, fever, asthma attacks, other verified illness
-- Requirement: Valid medical reasons confirmed by clinic staff
-
-HOSPITAL REFERRALS:
-- Referral hospital: Dongon Hospital
-- Emergency: Can go directly to hospital
-- Regular treatment: Visit clinic first for documentation
-- Refusal slip given when clinic cannot accommodate
-
-EMERGENCY PROCEDURES:
-- Inform teacher/staff → Escorted to clinic → First aid → Hospital referral if needed
-- Handles: Injuries, fainting, fever, asthma attacks, other urgent conditions
-
-OTHER SERVICES (ALL FREE for enrolled students):
-- First aid treatment
-- Chronic condition monitoring
-- Hospital referrals
-- Health counseling
-- Preventive care tips
-
-TALKING TO ADMIN:
-- Students can type "talk to admin" or "speak to admin" to connect with clinic staff
-- When admin mode is active, chatbot pauses automatically
-- Chatbot reactivates after 15 minutes of admin inactivity
+CLINIC INFO:
+Location: Ground Floor beside Theology Office | Dental: JHS Department
+Hours: Mon-Fri 8AM-5PM, Sat 8AM-12NN, Closed Sun/holidays
+Dentist: Mon-Fri 8:30-11:30AM & 1:30-4:30PM, Sat 8-11:30AM (10 slots, FREE anesthesia)
+Doctor: Tue/Wed/Thu 9AM-12NN (basic care available anytime)
+Medicines (FREE): Paracetamol, Dycolsen, Dycolgen, Loperamide, Erceflora, Antacid (max 2)
+Tooth Extraction: Main Clinic → referral slip → Dental Clinic (JHS)
+Certificates: For school excuse, fever, asthma, verified illness
+Referral Hospital: Dongon Hospital
+Services (FREE): First aid, monitoring, referrals, counseling
 
 ${conversationContext}
 
 User: ${userMessage}
 
-Respond in 2-4 sentences in ${detectedLang === 'ceb' ? 'Bisaya/Cebuano' : detectedLang === 'tl' ? 'Tagalog' : 'English'}. Be helpful, friendly, and use emojis appropriately. Base your answer ONLY on the clinic information above.`;
+Respond in 2-4 sentences. Be helpful and friendly. Use emojis. Base answer on clinic info only.`;
 
   const result = await model.generateContent(prompt);
-  const response = await result.response;
-  return response.text();
+  return result.response.text();
 }
 
-// Basic Mode Response (keyword-based fallback) - FIXED VERSION
 function getBasicResponse(userMessage, session, lang) {
   const lowerMsg = userMessage.toLowerCase();
   
   const responses = {
     en: {
-      greeting: "👋 Hi! I'm Meddy, your clinic assistant. How can I help you today?",
-      location: "📍 The clinic is located on the Ground Floor beside the Theology Office. The dental clinic is at the Junior High School Department.",
-      hours: "🕐 Clinic Hours:\n- Monday-Friday: 8:00 AM – 5:00 PM\n- Saturday: 8:00 AM – 12:00 NN\n- Closed Sundays & holidays",
-      doctor: "👨‍⚕️ Doctor's Schedule:\n- Tuesday, Wednesday, Thursday: 9:00 AM - 12:00 NN\n- Outside these hours, students can still visit for basic care.",
-      dentist: "🦷 Dentist Schedule:\n- Mon-Fri: 8:30-11:30 AM & 1:30-4:30 PM\n- Saturday: 8:00-11:30 AM\n- 10 extraction slots per session\n- FREE anesthesia during extraction",
-      medicines: "💊 Available Medicines (FREE):\n- Paracetamol, Dycolsen, Dycolgen, Loperamide, Erceflora, Antacid\n- Maximum 2 medicines per person\n- Parental consent required for minors",
-      extraction: "🦷 Tooth Extraction Process:\n1. Visit Main Campus Clinic\n2. Get referral slip\n3. Go to Dental Clinic at Junior High School\n4. Anesthesia is FREE!",
-      certificate: "📋 Medical certificates are issued for school excuses, fever, asthma attacks, and other verified illnesses.",
-      emergency: "🚨 Emergency Procedure:\n1. Inform teacher/staff\n2. Get escorted to clinic\n3. Receive first aid\n4. Hospital referral if needed",
-      referral: "🏥 Referral Hospital: Dongon Hospital\n- Emergency: Go directly\n- Regular: Visit clinic first for documentation",
-      services: "✨ Other Services (ALL FREE for enrolled students):\n- First aid treatment\n- Chronic condition monitoring\n- Hospital referrals\n- Health counseling\n- Preventive care tips",
-      default: "I'm here to help! Please ask me about:\n- Clinic location & hours\n- Doctor/dentist schedule\n- Medicines available\n- Tooth extraction\n- Medical certificates\n- Hospital referrals\n- Emergency procedures\n\nOr type 'talk to admin' to speak with clinic staff."
+      greeting: "Hi! 😊 How can I help you today?",
+      location: "📍 Main: Ground Floor beside Theology Office\nDental: JHS Department",
+      hours: "🕐 Mon-Fri: 8AM-5PM | Sat: 8AM-12NN | Closed Sun/holidays",
+      doctor: "👨‍⚕️ Doctor: Tue/Wed/Thu 9AM-12NN | Basic care anytime",
+      dentist: "🦷 Mon-Fri: 8:30-11:30AM & 1:30-4:30PM | Sat: 8-11:30AM\n10 slots | FREE anesthesia",
+      medicines: "💊 FREE: Paracetamol, Dycolsen, Dycolgen, Loperamide, Erceflora, Antacid\nMax 2 | Parental consent for minors",
+      extraction: "🦷 Steps:\n1. Main Clinic\n2. Get referral\n3. Dental Clinic (JHS)\n4. FREE anesthesia!",
+      certificate: "📋 For school excuse, fever, asthma, verified illness",
+      emergency: "🚨 Tell teacher → Clinic → First aid → Hospital if needed",
+      referral: "🏥 Dongon Hospital | Emergency: go direct | Regular: clinic first",
+      services: "✨ FREE: First aid, monitoring, referrals, counseling, preventive care",
+      default: "I can help with:\n📍 Location\n🕐 Hours\n👨‍⚕️ Doctor/Dentist\n💊 Medicines\n🦷 Extraction\n📋 Certificates\n🏥 Referrals\n\nType 'talk to admin' for staff"
     },
     tl: {
-      greeting: "👋 Kumusta! Ako si Meddy, ang clinic assistant. Paano kita matutulungan ngayon?",
-      location: "📍 Ang clinic ay matatagpuan sa Ground Floor beside the Theology Office. Ang dental clinic ay sa Junior High School Department.",
-      hours: "🕐 Oras ng Clinic:\n- Lunes-Biyernes: 8:00 AM – 5:00 PM\n- Sabado: 8:00 AM – 12:00 NN\n- Sarado tuwing Linggo at holiday",
-      doctor: "👨‍⚕️ Schedule ng Doktor:\n- Martes, Miyerkules, Huwebes: 9:00 AM - 12:00 NN\n- Pwede pa rin bisitahin ang clinic para sa basic care.",
-      dentist: "🦷 Schedule ng Dentista:\n- Lun-Biy: 8:30-11:30 AM & 1:30-4:30 PM\n- Sabado: 8:00-11:30 AM\n- 10 extraction slots per session\n- LIBRE ang anesthesia",
-      medicines: "💊 Available na Gamot (LIBRE):\n- Paracetamol, Dycolsen, Dycolgen, Loperamide, Erceflora, Antacid\n- Maximum 2 gamot per tao\n- Kailangan ng consent ng magulang para sa menor de edad",
-      extraction: "🦷 Proseso ng Tooth Extraction:\n1. Pumunta sa Main Campus Clinic\n2. Kumuha ng referral slip\n3. Pumunta sa Dental Clinic sa Junior High School\n4. Anesthesia ay LIBRE!",
-      certificate: "📋 Ang medical certificate ay ibinibigay para sa school excuse, lagnat, asthma attack, at iba pang sakit.",
-      emergency: "🚨 Emergency Procedure:\n1. Sabihin sa teacher/staff\n2. Ihahatid sa clinic\n3. Makakatanggap ng first aid\n4. Hospital referral kung kailangan",
-      referral: "🏥 Referral Hospital: Dongon Hospital\n- Emergency: Diretso sa hospital\n- Regular: Bisitahin muna ang clinic",
-      services: "✨ Ibang Services (LAHAT LIBRE para sa enrolled students):\n- First aid treatment\n- Monitoring ng chronic conditions\n- Hospital referrals\n- Health counseling\n- Preventive care tips",
-      default: "Nandito ako para tumulong! Tanungin mo ako tungkol sa:\n- Clinic location & oras\n- Doctor/dentist schedule\n- Available na gamot\n- Tooth extraction\n- Medical certificates\n- Hospital referrals\n- Emergency procedures\n\nO i-type ang 'talk to admin' para makipag-usap sa clinic staff."
+      greeting: "Kumusta! 😊 Paano kita matutulungan?",
+      location: "📍 Main: Ground Floor beside Theology Office\nDental: JHS Department",
+      hours: "🕐 Lun-Biy: 8AM-5PM | Sab: 8AM-12NN | Sarado Linggo/holiday",
+      doctor: "👨‍⚕️ Doktor: Mar/Miy/Huw 9AM-12NN | Basic care anytime",
+      dentist: "🦷 Lun-Biy: 8:30-11:30AM & 1:30-4:30PM | Sab: 8-11:30AM\n10 slots | LIBRE anesthesia",
+      medicines: "💊 LIBRE: Paracetamol, Dycolsen, Dycolgen, Loperamide, Erceflora, Antacid\nMax 2 | Consent ng magulang",
+      extraction: "🦷 Steps:\n1. Main Clinic\n2. Kuha referral\n3. Dental Clinic (JHS)\n4. LIBRE anesthesia!",
+      certificate: "📋 Para sa excuse, lagnat, asthma, sakit",
+      emergency: "🚨 Sabihin sa teacher → Clinic → First aid → Hospital kung kailangan",
+      referral: "🏥 Dongon Hospital | Emergency: diretso | Regular: clinic muna",
+      services: "✨ LIBRE: First aid, monitoring, referrals, counseling, preventive care",
+      default: "Matutulungan kita:\n📍 Location\n🕐 Oras\n👨‍⚕️ Doctor/Dentist\n💊 Gamot\n🦷 Extraction\n📋 Certificates\n🏥 Referrals\n\nType 'talk to admin' para sa staff"
     },
     ceb: {
-      greeting: "👋 Kumusta! Ako si Meddy, ang clinic assistant. Unsaon nako pagtabang nimo?",
-      location: "📍 Ang clinic naa sa Ground Floor beside the Theology Office. Ang dental clinic naa sa Junior High School Department.",
-      hours: "🕐 Oras sa Clinic:\n- Lunes-Biyernes: 8:00 AM – 5:00 PM\n- Sabado: 8:00 AM – 12:00 NN\n- Sarado tuwing Domingo ug holiday",
-      doctor: "👨‍⚕️ Schedule sa Doktor:\n- Martes, Miyerkules, Huwebes: 9:00 AM - 12:00 NN\n- Pwede gihapon moduaw sa clinic para sa basic care.",
-      dentist: "🦷 Schedule sa Dentista:\n- Lun-Biy: 8:30-11:30 AM & 1:30-4:30 PM\n- Sabado: 8:00-11:30 AM\n- 10 extraction slots per session\n- LIBRE ang anesthesia",
-      medicines: "💊 Available nga Tambal (LIBRE):\n- Paracetamol, Dycolsen, Dycolgen, Loperamide, Erceflora, Antacid\n- Maximum 2 ka tambal per tawo\n- Kinahanglan og consent sa ginikanan para sa menor de edad",
-      extraction: "🦷 Proseso sa Tooth Extraction:\n1. Adto sa Main Campus Clinic\n2. Kuha og referral slip\n3. Adto sa Dental Clinic sa Junior High School\n4. Anesthesia LIBRE!",
-      certificate: "📋 Ang medical certificate ihatag para sa school excuse, hilanat, asthma attack, ug uban pang sakit.",
-      emergency: "🚨 Emergency Procedure:\n1. Sulti sa teacher/staff\n2. Dad-on sa clinic\n3. Makadawat og first aid\n4. Hospital referral kung kinahanglan",
-      referral: "🏥 Referral Hospital: Dongon Hospital\n- Emergency: Direkta sa hospital\n- Regular: Duaw sa una sa clinic",
-      services: "✨ Uban pang Services (LAHAT LIBRE para sa enrolled students):\n- First aid treatment\n- Monitoring ng chronic conditions\n- Hospital referrals\n- Health counseling\n- Preventive care tips",
-      default: "Nandito ako para tumulong! Pangutana ko tungkol sa:\n- Clinic location & oras\n- Doctor/dentist schedule\n- Available na tambal\n- Tooth extraction\n- Medical certificates\n- Hospital referrals\n- Emergency procedures\n\nO i-type ang 'talk to admin' para makipag-usap sa clinic staff."
+      greeting: "Kumusta! 😊 Unsaon nako pagtabang?",
+      location: "📍 Main: Ground Floor beside Theology Office\nDental: JHS Department",
+      hours: "🕐 Lun-Biy: 8AM-5PM | Sab: 8AM-12NN | Sarado Domingo/holiday",
+      doctor: "👨‍⚕️ Doktor: Mar/Miy/Huw 9AM-12NN | Basic care anytime",
+      dentist: "🦷 Lun-Biy: 8:30-11:30AM & 1:30-4:30PM | Sab: 8-11:30AM\n10 slots | LIBRE anesthesia",
+      medicines: "💊 LIBRE: Paracetamol, Dycolsen, Dycolgen, Loperamide, Erceflora, Antacid\nMax 2 | Consent sa ginikanan",
+      extraction: "🦷 Steps:\n1. Main Clinic\n2. Kuha referral\n3. Dental Clinic (JHS)\n4. LIBRE anesthesia!",
+      certificate: "📋 Para sa excuse, hilanat, asthma, sakit",
+      emergency: "🚨 Sulti sa teacher → Clinic → First aid → Hospital kung kinahanglan",
+      referral: "🏥 Dongon Hospital | Emergency: direkta | Regular: clinic una",
+      services: "✨ LIBRE: First aid, monitoring, referrals, counseling, preventive care",
+      default: "Makatabang ko:\n📍 Location\n🕐 Oras\n👨‍⚕️ Doctor/Dentist\n💊 Tambal\n🦷 Extraction\n📋 Certificates\n🏥 Referrals\n\nType 'talk to admin' para sa staff"
     }
   };
 
-  const langResponses = responses[lang] || responses.en;
+  const r = responses[lang] || responses.en;
 
-  // Keyword matching with better logic
-  if (/(hi|hello|hey|kumusta|kamusta|unsay sabay|pregunta|question|help)/i.test(lowerMsg)) {
-    return langResponses.greeting;
-  } 
+  if (/(hi|hello|hey|kumusta)/i.test(lowerMsg)) return r.greeting;
+  if (/(where|location|asa|saan|diin)/i.test(lowerMsg)) return r.location;
+  if (/(hours|time|schedule|oras|open)/i.test(lowerMsg) && !/(doctor|dentist)/i.test(lowerMsg)) return r.hours;
+  if (/(doctor|doktor)/i.test(lowerMsg)) return r.doctor;
+  if (/(dentist|dental|ngipon)/i.test(lowerMsg)) return r.dentist;
+  if (/(medicine|gamot|tambal)/i.test(lowerMsg)) return r.medicines;
+  if (/(extraction|bunot|tanggal)/i.test(lowerMsg)) return r.extraction;
+  if (/(certificate|cert|excuse)/i.test(lowerMsg)) return r.certificate;
+  if (/(emergency|emerhensya|urgent)/i.test(lowerMsg)) return r.emergency;
+  if (/(referral|hospital|ospital)/i.test(lowerMsg)) return r.referral;
+  if (/(service|offer)/i.test(lowerMsg)) return r.services;
   
-  if (/(where|location|asa|saan|diin|located|clinic info)/i.test(lowerMsg)) {
-    return langResponses.location;
-  } 
-  
-  if (/(hours|time|schedule|oras|open|close|when open|sarado|bukas)/i.test(lowerMsg) && !/(doctor|dentist|doktor|dentista)/i.test(lowerMsg)) {
-    return langResponses.hours;
-  } 
-  
-  if (/(doctor|doktor|physician|visit doctor|makita doctor)/i.test(lowerMsg)) {
-    return langResponses.doctor;
-  } 
-  
-  if (/(dentist|dental|ngipon|bungo|dentista|tooth|gigi)/i.test(lowerMsg)) {
-    return langResponses.dentist;
-  } 
-  
-  if (/(medicine|gamot|tambal|drugs|medication)/i.test(lowerMsg)) {
-    return langResponses.medicines;
-  } 
-  
-  if (/(extraction|bunot|tanggal|extract|tooth extraction|ngipon)/i.test(lowerMsg)) {
-    return langResponses.extraction;
-  } 
-  
-  if (/(certificate|certify|cert|excuse)/i.test(lowerMsg)) {
-    return langResponses.certificate;
-  } 
-  
-  if (/(emergency|emerhensya|kadalian|urgent|accident|injury|injured)/i.test(lowerMsg)) {
-    return langResponses.emergency;
-  } 
-  
-  if (/(referral|hospital|ospital|dongon|refer)/i.test(lowerMsg)) {
-    return langResponses.referral;
-  }
-  
-  if (/(service|services|offer|other|what do you have|ano ang)/i.test(lowerMsg)) {
-    return langResponses.services;
-  }
-  
-  return langResponses.default;
+  return r.default;
 }
 
 function detectLanguageFallback(text) {
   const lowerText = text.toLowerCase();
   
-  const bisayaWords = ['unsa', 'kanus-a', 'kanusa', 'unsaon', 'asa', 'naa', 'wala', 
-                       'tambal', 'ngipon', 'doktor', 'dentista', 'maayo', 'salamat kaayo',
-                       'kumusta', 'pila', 'libre', 'bayad', 'kinsa', 'ngano', 'diin'];
+  const bisayaWords = ['unsa', 'kanus-a', 'asa', 'naa', 'wala', 'tambal', 'ngipon', 
+                       'doktor', 'kumusta', 'pila', 'libre', 'diin'];
+  const tagalogWords = ['kumusta', 'ako', 'ang', 'ng', 'sa', 'po', 'salamat', 
+                        'ano', 'kelan', 'paano', 'gamot', 'sakit', 'ngipin', 'saan'];
   
-  const tagalogWords = ['kumusta', 'ako', 'ang', 'ng', 'sa', 'po', 'opo', 'salamat', 
-                        'ano', 'kelan', 'kailan', 'paano', 'gamot', 'sakit', 'ngipin',
-                        'magkano', 'libre', 'bayad', 'sino', 'saan'];
-  
-  const bisayaCount = bisayaWords.filter(word => lowerText.includes(word)).length;
-  const tagalogCount = tagalogWords.filter(word => lowerText.includes(word)).length;
+  const bisayaCount = bisayaWords.filter(w => lowerText.includes(w)).length;
+  const tagalogCount = tagalogWords.filter(w => lowerText.includes(w)).length;
   
   if (bisayaCount >= 1) return 'ceb';
   if (tagalogCount >= 2) return 'tl';
@@ -617,39 +497,34 @@ function handlePostback(senderId, postback) {
   const payload = postback.payload;
   const session = getUserSession(senderId);
 
-  console.log('📍 Postback payload:', payload);
-
   if (session.adminMode) {
     updateAdminActivity(senderId);
     return;
   }
 
   if (payload === 'MAIN_MENU') {
-    session.menuLevel = 'main';
-    sendMainMenu(senderId, 'en');
+    sendMainMenu(senderId, 'en', false);
     return;
   }
 
   if (payload === 'TALK_TO_ADMIN') {
     enableAdminMode(senderId);
-    
-    const adminModeMsg = "👨‍💼 Admin mode activated! A clinic staff member has been notified and will respond to you shortly. Meddy is now paused.\n\n(Meddy will automatically reactivate after 15 minutes of admin inactivity)";
-    
-    sendTextMessage(senderId, adminModeMsg);
+    const msg = "Our support team has been notified and will respond soon. 😊\n\nYour patience means a lot! 🙏";
+    sendTextMessage(senderId, msg);
     updateAdminActivity(senderId);
     return;
   }
 
   const messageMap = {
-    'CLINIC_INFO': 'Tell me about clinic location and hours',
-    'DOCTOR_SCHEDULE': 'When is the doctor available?',
-    'DENTAL_SERVICES': 'Tell me about dental services',
-    'MEDICINES': 'What medicines are available?',
-    'CERTIFICATES': 'How do I get a medical certificate?',
-    'REFERRALS': 'Tell me about hospital referrals',
-    'EMERGENCY': 'What should I do in an emergency?',
-    'OTHER_SERVICES': 'What other services does the clinic offer?',
-    'TOOTH_EXTRACTION': 'How do I get a tooth extraction?'
+    'CLINIC_INFO': 'clinic location and hours',
+    'DOCTOR_SCHEDULE': 'doctor schedule',
+    'DENTAL_SERVICES': 'dental services',
+    'MEDICINES': 'available medicines',
+    'CERTIFICATES': 'medical certificate',
+    'REFERRALS': 'hospital referrals',
+    'EMERGENCY': 'emergency procedures',
+    'OTHER_SERVICES': 'other services',
+    'TOOTH_EXTRACTION': 'tooth extraction'
   };
 
   const simulatedMessage = messageMap[payload];
@@ -657,27 +532,25 @@ function handlePostback(senderId, postback) {
     session.lastLang = 'en';
     handleMessage(senderId, { text: simulatedMessage });
   } else {
-    sendMainMenu(senderId, 'en');
+    sendMainMenu(senderId, 'en', false);
   }
 }
 
-function sendMainMenu(senderId, lang = 'en') {
+function sendMainMenu(senderId, lang = 'en', skipIfAdmin = true) {
   const session = getUserSession(senderId);
   
-  if (session && session.adminMode) {
-    return;
-  }
+  if (skipIfAdmin && session && session.adminMode) return;
 
-  const menuText = "🏥 Saint Joseph College Clinic\n👋 Hi! I'm Meddy, your clinic assistant!\n\nChoose a category below:";
+  const menuText = "So we can help you better, please choose an option from the menu. 📱";
 
   const quickReplies = [
-    { title: "📍 Clinic Info & Hours", payload: "CLINIC_INFO" },
-    { title: "👨‍⚕️ Doctor's Schedule", payload: "DOCTOR_SCHEDULE" },
-    { title: "🦷 Dental Services", payload: "DENTAL_SERVICES" },
+    { title: "📍 Clinic Info", payload: "CLINIC_INFO" },
+    { title: "👨‍⚕️ Doctor", payload: "DOCTOR_SCHEDULE" },
+    { title: "🦷 Dental", payload: "DENTAL_SERVICES" },
     { title: "💊 Medicines", payload: "MEDICINES" },
-    { title: "📋 Medical Certificates", payload: "CERTIFICATES" },
-    { title: "🏥 Referrals & Hospitals", payload: "REFERRALS" },
-    { title: "🚨 Emergency & First Aid", payload: "EMERGENCY" },
+    { title: "📋 Certificate", payload: "CERTIFICATES" },
+    { title: "🏥 Referrals", payload: "REFERRALS" },
+    { title: "🚨 Emergency", payload: "EMERGENCY" },
     { title: "✨ Other Services", payload: "OTHER_SERVICES" },
     { title: "👨‍💼 Talk to Admin", payload: "TALK_TO_ADMIN" }
   ];
@@ -688,25 +561,19 @@ function sendMainMenu(senderId, lang = 'en') {
     payload: item.payload
   }));
 
-  const message = {
-    text: menuText,
-    quick_replies: formattedReplies
-  };
-
-  sendMessage(senderId, message);
+  sendMessage(senderId, { text: menuText, quick_replies: formattedReplies });
 }
 
 function sendTypingIndicator(senderId, isTyping) {
   const action = isTyping ? 'typing_on' : 'typing_off';
-  
   axios.post(`https://graph.facebook.com/v18.0/me/messages`, {
     recipient: { id: senderId },
     sender_action: action
   }, {
     params: { access_token: PAGE_ACCESS_TOKEN }
-  }).catch(error => {
-    if (error.response?.data?.error?.code !== 100) {
-      console.error('⚠️ Typing indicator error:', error.message);
+  }).catch(err => {
+    if (err.response?.data?.error?.code !== 100) {
+      console.error('⚠️ Typing error:', err.message);
     }
   });
 }
@@ -723,55 +590,44 @@ function sendMessage(senderId, message) {
   }, {
     params: { access_token: PAGE_ACCESS_TOKEN }
   })
-  .then(response => {
-    console.log('✅ Message sent successfully');
-  })
+  .then(() => console.log('✅ Message sent'))
   .catch(error => {
     const errorData = error.response?.data?.error;
     const errorCode = errorData?.code;
     const errorSubcode = errorData?.error_subcode;
     
     if (errorCode === 100 && errorSubcode === 2018001) {
-      console.log(`⚠️ User ${senderId} not reachable (blocked/deleted/unsubscribed)`);
+      console.log(`⚠️ User ${senderId} unreachable`);
       return;
     }
     
     if (errorCode === 100) {
-      console.log(`⚠️ Cannot send to user ${senderId}: ${errorData?.message}`);
+      console.log(`⚠️ Cannot send to ${senderId}`);
       return;
     }
     
-    console.error('❌ Error sending message:', errorData || error.message);
+    console.error('❌ Send error:', errorData || error.message);
   });
 }
 
 app.post('/admin/enable/:userId', (req, res) => {
-  const userId = req.params.userId;
-  enableAdminMode(userId);
-  res.json({ success: true, message: `Admin mode enabled for user ${userId}` });
+  enableAdminMode(req.params.userId);
+  res.json({ success: true, message: 'Admin mode enabled' });
 });
 
 app.post('/admin/disable/:userId', (req, res) => {
-  const userId = req.params.userId;
-  disableAdminMode(userId, false);
-  res.json({ success: true, message: `Admin mode disabled for user ${userId}` });
+  disableAdminMode(req.params.userId, false);
+  res.json({ success: true, message: 'Admin mode disabled' });
 });
 
 app.get('/admin/status/:userId', (req, res) => {
-  const userId = req.params.userId;
-  const session = userSessions.get(userId);
-  
-  if (!session) {
-    res.json({ exists: false });
-  } else {
-    res.json({
-      exists: true,
-      adminMode: session.adminMode,
-      lastAdminActivity: session.lastAdminActivity,
-      lastLang: session.lastLang,
-      conversationCount: session.conversationCount
-    });
-  }
+  const session = userSessions.get(req.params.userId);
+  res.json(session ? {
+    exists: true,
+    adminMode: session.adminMode,
+    lastLang: session.lastLang,
+    conversationCount: session.conversationCount
+  } : { exists: false });
 });
 
 app.get('/admin/sessions', (req, res) => {
@@ -812,16 +668,16 @@ app.post('/admin/switch-model/:index', (req, res) => {
     requestCount = 0;
     lastResetTime = Date.now();
     const model = AI_MODELS[index];
-    console.log(`🔄 Manually switched to model: ${model.name}`);
+    console.log(`🔄 Switched to: ${model.name}`);
     res.json({ success: true, currentModel: model });
   } else {
-    res.status(400).json({ success: false, error: 'Invalid model index' });
+    res.status(400).json({ success: false, error: 'Invalid index' });
   }
 });
 
 app.get('/', (req, res) => {
   const currentModel = getCurrentModel();
-  res.send(`✅ Meddy - Saint Joseph College Clinic Chatbot is running! 🏥🤖\n\nCurrent AI Model: ${currentModel.name} (${currentModel.type})\nRequests: ${requestCount}/${currentModel.maxRequests} this minute`);
+  res.send(`✅ Meddy Chatbot Running! 🏥\n\nModel: ${currentModel.name}\nRequests: ${requestCount}/${currentModel.maxRequests}`);
 });
 
 app.get('/test-ai', async (req, res) => {
@@ -829,11 +685,7 @@ app.get('/test-ai', async (req, res) => {
   const lang = req.query.lang || 'en';
   
   try {
-    const session = {
-      conversationHistory: [],
-      lastLang: lang
-    };
-    
+    const session = { conversationHistory: [], lastLang: lang };
     const response = await getAIResponse(testMessage, session, lang);
     const currentModel = getCurrentModel();
     
@@ -845,27 +697,19 @@ app.get('/test-ai', async (req, res) => {
       modelType: currentModel.type
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
 app.get('/test-models', async (req, res) => {
   try {
     if (!GEMINI_API_KEY) {
-      return res.status(400).json({
-        success: false,
-        error: 'GEMINI_API_KEY not configured'
-      });
+      return res.status(400).json({ success: false, error: 'GEMINI_API_KEY not configured' });
     }
 
     const response = await axios.get(
       'https://generativelanguage.googleapis.com/v1beta/models',
-      {
-        params: { key: GEMINI_API_KEY }
-      }
+      { params: { key: GEMINI_API_KEY } }
     );
     
     const modelNames = response.data.models
@@ -876,24 +720,17 @@ app.get('/test-models', async (req, res) => {
         description: m.description
       }));
     
-    res.json({
-      success: true,
-      availableModels: modelNames
-    });
+    res.json({ success: true, availableModels: modelNames });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   const currentModel = getCurrentModel();
-  console.log(`🚀 Server is running on port ${PORT}`);
-  console.log(`🤖 AI integration: ${GEMINI_API_KEY ? 'ENABLED ✅' : 'BASIC MODE ONLY ⚠️'}`);
-  console.log(`🔧 Current AI Model: ${currentModel.name} (${currentModel.type})`);
-  console.log(`⏱️  Rate limit: ${currentModel.maxRequests} requests per minute`);
-  console.log(`📊 Available models: ${AI_MODELS.map(m => m.name).join(', ')}`);
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🤖 AI: ${GEMINI_API_KEY ? 'ENABLED ✅' : 'BASIC MODE ⚠️'}`);
+  console.log(`🔧 Model: ${currentModel.name} (${currentModel.type})`);
+  console.log(`⏱️  Rate: ${currentModel.maxRequests} req/min`);
 });
