@@ -8,10 +8,17 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const app = express();
 app.use(bodyParser.json());
 
-const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
+// UPDATED: Support multiple page tokens
+const PAGE_ACCESS_TOKEN_1 = process.env.PAGE_ACCESS_TOKEN_1;
+const PAGE_ACCESS_TOKEN_2 = process.env.PAGE_ACCESS_TOKEN_2;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const PAGE_ID = process.env.PAGE_ID; // ADD THIS TO YOUR .env FILE
+
+// Map page IDs to their tokens
+const PAGE_TOKENS = {
+  '118188723419449': PAGE_ACCESS_TOKEN_1,
+  '779719758563529': PAGE_ACCESS_TOKEN_2
+};
 
 // Initialize Gemini AI
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
@@ -139,7 +146,8 @@ function getUserSession(userId) {
       lastAdminActivity: null,
       adminInactivityTimer: null,
       goodbyeSent: false,
-      hasIntroduced: false
+      hasIntroduced: false,
+      pageId: null // ADDED: Track which page user is messaging
     });
   }
   
@@ -151,10 +159,19 @@ function getUserSession(userId) {
   return session;
 }
 
+// UPDATED: Get the correct token for a user based on their page
+function getPageTokenForUser(userId) {
+  const session = userSessions.get(userId);
+  if (session && session.pageId && PAGE_TOKENS[session.pageId]) {
+    return PAGE_TOKENS[session.pageId];
+  }
+  // Fallback to first token
+  return PAGE_ACCESS_TOKEN_1;
+}
+
 function enableAdminMode(userId, silent = false) {
   const session = getUserSession(userId);
   
-  // If already in admin mode, just update activity
   if (session.adminMode) {
     updateAdminActivity(userId);
     return;
@@ -167,14 +184,12 @@ function enableAdminMode(userId, silent = false) {
     clearTimeout(session.adminInactivityTimer);
   }
   
-  // Set up auto-disable timer
   session.adminInactivityTimer = setTimeout(() => {
     disableAdminMode(userId, true);
   }, ADMIN_INACTIVE_TIMEOUT);
   
   console.log(`✅ Admin mode ENABLED for user ${userId}`);
   
-  // Send notification to user if not silent
   if (!silent) {
     const adminModeMsg = {
       en: "👨‍💼 Admin mode activated! A clinic staff member will respond to you shortly. Meddy is now paused.\n\n(Meddy will automatically reactivate after 15 minutes of staff inactivity)",
@@ -191,12 +206,10 @@ function updateAdminActivity(userId) {
   if (session && session.adminMode) {
     session.lastAdminActivity = Date.now();
     
-    // Clear existing timer
     if (session.adminInactivityTimer) {
       clearTimeout(session.adminInactivityTimer);
     }
     
-    // Set new timer
     session.adminInactivityTimer = setTimeout(() => {
       disableAdminMode(userId, true);
     }, ADMIN_INACTIVE_TIMEOUT);
@@ -234,7 +247,6 @@ function disableAdminMode(userId, autoDisabled = false) {
   }
 }
 
-// Check for user inactivity and send thank you message
 setInterval(() => {
   const now = Date.now();
   const INACTIVITY_THRESHOLD = 15 * 60 * 1000;
@@ -284,17 +296,14 @@ app.post('/webhook', (req, res) => {
     body.entry.forEach(entry => {
       const webhookEvent = entry.messaging[0];
       const senderId = webhookEvent.sender.id;
+      const pageId = entry.id; // ADDED: Get the page ID from entry
 
-      // Check if this is a message from the page (admin) or user
+      // UPDATED: Store the page ID in session
+      const session = getUserSession(senderId);
+      session.pageId = pageId;
+
       if (webhookEvent.message) {
-        // Check if sender is the page itself (admin replying)
-        if (senderId === PAGE_ID) {
-          // This is an admin message, don't process it
-          console.log('📤 Admin message sent, skipping bot response');
-          return;
-        }
-        
-        // Check if message has 'is_echo' flag (means it's from the page)
+        // Check if this is an echo message (from the page itself)
         if (webhookEvent.message.is_echo) {
           console.log('📤 Echo message (from page), skipping');
           return;
@@ -311,13 +320,12 @@ app.post('/webhook', (req, res) => {
   }
 });
 
-// New endpoint to detect admin replies
 app.post('/webhook/admin-reply', (req, res) => {
   const { userId } = req.body;
   
   if (userId) {
     console.log(`👨‍💼 Admin replied to user ${userId}, enabling admin mode`);
-    enableAdminMode(userId, true); // Silent enable
+    enableAdminMode(userId, true);
     res.json({ success: true, message: 'Admin mode enabled' });
   } else {
     res.status(400).json({ success: false, error: 'userId required' });
@@ -330,7 +338,6 @@ async function handleMessage(senderId, message) {
 
   const session = getUserSession(senderId);
 
-  // Check for thank you / goodbye messages
   const thankYouKeywords = ['thank', 'thanks', 'salamat', 'salamat kaayo', 'thank you', 'ty'];
   const goodbyeKeywords = ['bye', 'goodbye', 'see you', 'paalam', 'sige', 'adios', 'hangtod'];
   
@@ -356,7 +363,6 @@ async function handleMessage(senderId, message) {
     return;
   }
 
-  // If in admin mode, just update activity and don't respond
   if (session.adminMode) {
     updateAdminActivity(senderId);
     console.log(`💬 Message from user ${senderId} in admin mode - bot paused`);
@@ -786,12 +792,13 @@ function sendMainMenu(senderId, lang = 'en') {
 
 function sendTypingIndicator(senderId, isTyping) {
   const action = isTyping ? 'typing_on' : 'typing_off';
+  const token = getPageTokenForUser(senderId);
   
   axios.post(`https://graph.facebook.com/v18.0/me/messages`, {
     recipient: { id: senderId },
     sender_action: action
   }, {
-    params: { access_token: PAGE_ACCESS_TOKEN }
+    params: { access_token: token }
   }).catch(error => {
     if (error.response?.data?.error?.code !== 100) {
       console.error('⚠️ Typing indicator error:', error.message);
@@ -804,12 +811,14 @@ function sendTextMessage(senderId, text) {
 }
 
 function sendMessage(senderId, message) {
+  const token = getPageTokenForUser(senderId);
+  
   axios.post(`https://graph.facebook.com/v18.0/me/messages`, {
     recipient: { id: senderId },
     message: message,
     messaging_type: 'RESPONSE'
   }, {
-    params: { access_token: PAGE_ACCESS_TOKEN }
+    params: { access_token: token }
   })
   .then(response => {
     console.log('✅ Message sent successfully');
@@ -858,7 +867,8 @@ app.get('/admin/status/:userId', (req, res) => {
       adminMode: session.adminMode,
       lastAdminActivity: session.lastAdminActivity,
       lastLang: session.lastLang,
-      conversationCount: session.conversationCount
+      conversationCount: session.conversationCount,
+      pageId: session.pageId
     });
   }
 });
@@ -871,7 +881,8 @@ app.get('/admin/sessions', (req, res) => {
       adminMode: session.adminMode,
       lastLang: session.lastLang,
       conversationCount: session.conversationCount,
-      lastInteraction: new Date(session.lastInteraction).toISOString()
+      lastInteraction: new Date(session.lastInteraction).toISOString(),
+      pageId: session.pageId
     });
   }
   res.json({ totalSessions: sessions.length, sessions });
@@ -910,7 +921,8 @@ app.post('/admin/switch-model/:index', (req, res) => {
 
 app.get('/', (req, res) => {
   const currentModel = getCurrentModel();
-  res.send(`✅ Meddy - Saint Joseph College Clinic Chatbot is running! 🏥🤖\n\nCurrent AI Model: ${currentModel.name} (${currentModel.type})\nRequests: ${requestCount}/${currentModel.maxRequests} this minute`);
+  const configuredPages = Object.keys(PAGE_TOKENS).filter(pageId => PAGE_TOKENS[pageId]);
+  res.send(`✅ Meddy - Saint Joseph College Clinic Chatbot is running! 🏥🤖\n\nCurrent AI Model: ${currentModel.name} (${currentModel.type})\nRequests: ${requestCount}/${currentModel.maxRequests} this minute\nConfigured Pages: ${configuredPages.length}`);
 });
 
 app.get('/test-ai', async (req, res) => {
@@ -980,10 +992,19 @@ app.get('/test-models', async (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   const currentModel = getCurrentModel();
+  const configuredPages = Object.keys(PAGE_TOKENS).filter(pageId => PAGE_TOKENS[pageId]);
+  
   console.log(`🚀 Server is running on port ${PORT}`);
   console.log(`🤖 AI integration: ${GEMINI_API_KEY ? 'ENABLED ✅' : 'BASIC MODE ONLY ⚠️'}`);
   console.log(`🔧 Current AI Model: ${currentModel.name} (${currentModel.type})`);
   console.log(`⏱️  Rate limit: ${currentModel.maxRequests} requests per minute`);
   console.log(`📊 Available models: ${AI_MODELS.map(m => m.name).join(', ')}`);
-  console.log(`📄 PAGE_ID configured: ${PAGE_ID ? 'YES ✅' : 'NO ⚠️ (Add to .env file)'}`);
+  console.log(`📄 Configured Facebook Pages: ${configuredPages.length}`);
+  configuredPages.forEach(pageId => {
+    console.log(`   - Page ID: ${pageId} ✅`);
+  });
+  
+  if (configuredPages.length === 0) {
+    console.log(`⚠️  WARNING: No page tokens configured! Add PAGE_ACCESS_TOKEN_1 and PAGE_ACCESS_TOKEN_2 to your .env file`);
+  }
 });
