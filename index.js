@@ -254,7 +254,8 @@ setInterval(() => {
   for (const [userId, session] of userSessions.entries()) {
     const inactiveDuration = now - session.lastInteraction;
     
-    if (inactiveDuration >= INACTIVITY_THRESHOLD && inactiveDuration < INACTIVITY_THRESHOLD + 300000 && !session.goodbyeSent) {
+    // FIXED: Check goodbyeSent FIRST before sending
+    if (!session.goodbyeSent && inactiveDuration >= INACTIVITY_THRESHOLD && inactiveDuration < INACTIVITY_THRESHOLD + 300000) {
       const lang = session.lastLang || 'en';
       const inactivityMsg = {
         en: "Thank you for messaging the Saint Joseph College Clinic! 😊\n\nIf you need any assistance in the future, feel free to message us anytime. Stay healthy and take care! 👋",
