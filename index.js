@@ -147,14 +147,14 @@ function getUserSession(userId) {
       adminInactivityTimer: null,
       goodbyeSent: false,
       hasIntroduced: false,
-      pageId: null // ADDED: Track which page user is messaging
+      pageId: null
     });
   }
   
   const session = userSessions.get(userId);
   session.lastInteraction = Date.now();
   session.conversationCount++;
-  session.goodbyeSent = false;
+  // REMOVED: session.goodbyeSent = false;  <-- This was resetting the flag!
   
   return session;
 }
@@ -332,24 +332,33 @@ app.post('/webhook/admin-reply', (req, res) => {
   }
 });
 
+// Replace the handleMessage function with this fixed version
+
 async function handleMessage(senderId, message) {
   const text = message.text?.trim() || '';
   if (!text) return;
 
   const session = getUserSession(senderId);
 
+  // More specific thank you detection - check if message is PRIMARILY thanking
   const thankYouKeywords = ['thank', 'thanks', 'salamat', 'salamat kaayo', 'thank you', 'ty'];
   const goodbyeKeywords = ['bye', 'goodbye', 'see you', 'paalam', 'sige', 'adios', 'hangtod'];
   
-  if (thankYouKeywords.some(keyword => text.toLowerCase().includes(keyword)) || 
-      goodbyeKeywords.some(keyword => text.toLowerCase().includes(keyword))) {
+  const isThankYou = thankYouKeywords.some(keyword => text.toLowerCase() === keyword || 
+                                           text.toLowerCase().startsWith(keyword + ' '));
+  const isGoodbye = goodbyeKeywords.some(keyword => text.toLowerCase().includes(keyword));
+  
+  if (isThankYou || isGoodbye) {
+    // Mark session as conversation ended
+    session.goodbyeSent = true;
+    
     const farewellMsg = {
       en: "You're welcome! Thank you for messaging the Saint Joseph College Clinic. Stay healthy! 😊\n\nFeel free to reach out anytime you need assistance. Take care! 👋",
       tl: "Walang anuman! Salamat sa pag-message sa Saint Joseph College Clinic. Mag-ingat ka! 😊\n\nBumalik ka lang kung kailangan mo ng tulong. Ingat! 👋",
       ceb: "Walay sapayan! Salamat sa pag-message sa Saint Joseph College Clinic. Pag-amping! 😊\n\nBalik lang kung kinahanglan nimo og tabang. Amping! 👋"
     };
     sendTextMessage(senderId, farewellMsg[session.lastLang] || farewellMsg.en);
-    return;
+    return; // IMPORTANT: Stop processing here
   }
 
   const talkToAdminKeywords = ['talk to admin', 'speak to admin', 'contact admin', 
@@ -366,6 +375,12 @@ async function handleMessage(senderId, message) {
   if (session.adminMode) {
     updateAdminActivity(senderId);
     console.log(`💬 Message from user ${senderId} in admin mode - bot paused`);
+    return;
+  }
+
+  // ADDED: Check if conversation has already ended
+  if (session.goodbyeSent) {
+    console.log(`⏭️  Skipping message from ${senderId} - conversation already ended`);
     return;
   }
 
