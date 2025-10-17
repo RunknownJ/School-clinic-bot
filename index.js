@@ -341,6 +341,19 @@ async function handleMessage(senderId, message) {
 
   const session = getUserSession(senderId);
 
+  // ✅ CHECK ADMIN MODE FIRST - before any other processing
+  if (session.adminMode) {
+    updateAdminActivity(senderId);
+    console.log(`💬 Message from user ${senderId} in admin mode - bot paused`);
+    return;
+  }
+
+  // ✅ Then check if conversation has already ended
+  if (session.goodbyeSent) {
+    console.log(`⏭️  Skipping message from ${senderId} - conversation already ended`);
+    return;
+  }
+
   // More specific thank you detection - check if message is PRIMARILY thanking
   const thankYouKeywords = ['thank', 'thanks', 'salamat', 'salamat kaayo', 'thank you', 'ty'];
   const goodbyeKeywords = ['bye', 'goodbye', 'see you', 'paalam', 'sige', 'adios', 'hangtod'];
@@ -370,18 +383,6 @@ async function handleMessage(senderId, message) {
   if (talkToAdminKeywords.some(keyword => text.toLowerCase().includes(keyword))) {
     enableAdminMode(senderId);
     updateAdminActivity(senderId);
-    return;
-  }
-
-  if (session.adminMode) {
-    updateAdminActivity(senderId);
-    console.log(`💬 Message from user ${senderId} in admin mode - bot paused`);
-    return;
-  }
-
-  // ADDED: Check if conversation has already ended
-  if (session.goodbyeSent) {
-    console.log(`⏭️  Skipping message from ${senderId} - conversation already ended`);
     return;
   }
 
