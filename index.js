@@ -11,6 +11,7 @@ app.use(bodyParser.json());
 const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const PAGE_ID = process.env.PAGE_ID; // ADD THIS TO YOUR .env FILE
 
 // Initialize Gemini AI
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
@@ -18,25 +19,25 @@ const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 // AI Model Configuration with multiple fallbacks
 const AI_MODELS = [
   {
-    name: 'gemini-2.5-flash',      // ✅ FREE - Best option
+    name: 'gemini-2.5-flash',
     type: 'gemini',
     maxRequests: 15,
     enabled: true
   },
   {
-    name: 'gemini-2.5-flash-lite', // ✅ FREE - Faster, lighter
+    name: 'gemini-2.5-flash-lite',
     type: 'gemini',
     maxRequests: 15,
     enabled: true
   },
   {
-    name: 'gemini-2.0-flash-001',  // ✅ FREE - Backup
+    name: 'gemini-2.0-flash-001',
     type: 'gemini',
     maxRequests: 15,
     enabled: true
   },
   {
-    name: 'basic',                  // ✅ FREE - Always available
+    name: 'basic',
     type: 'basic',
     maxRequests: 999,
     enabled: true
@@ -145,13 +146,20 @@ function getUserSession(userId) {
   const session = userSessions.get(userId);
   session.lastInteraction = Date.now();
   session.conversationCount++;
-  session.goodbyeSent = false; // Reset goodbye flag on new interaction
+  session.goodbyeSent = false;
   
   return session;
 }
 
-function enableAdminMode(userId) {
+function enableAdminMode(userId, silent = false) {
   const session = getUserSession(userId);
+  
+  // If already in admin mode, just update activity
+  if (session.adminMode) {
+    updateAdminActivity(userId);
+    return;
+  }
+  
   session.adminMode = true;
   session.lastAdminActivity = Date.now();
   
@@ -159,7 +167,23 @@ function enableAdminMode(userId) {
     clearTimeout(session.adminInactivityTimer);
   }
   
+  // Set up auto-disable timer
+  session.adminInactivityTimer = setTimeout(() => {
+    disableAdminMode(userId, true);
+  }, ADMIN_INACTIVE_TIMEOUT);
+  
   console.log(`✅ Admin mode ENABLED for user ${userId}`);
+  
+  // Send notification to user if not silent
+  if (!silent) {
+    const adminModeMsg = {
+      en: "👨‍💼 Admin mode activated! A clinic staff member will respond to you shortly. Meddy is now paused.\n\n(Meddy will automatically reactivate after 15 minutes of staff inactivity)",
+      tl: "👨‍💼 Admin mode activated! Sasagutin ka ng clinic staff. Si Meddy ay naka-pause na.\n\n(Si Meddy ay babalik pagkatapos ng 15 minuto ng walang staff activity)",
+      ceb: "👨‍💼 Admin mode activated! Tubagon ka sa clinic staff. Si Meddy gi-pause na.\n\n(Si Meddy mobalik human sa 15 minuto nga walay staff activity)"
+    };
+    
+    sendTextMessage(userId, adminModeMsg[session.lastLang] || adminModeMsg.en);
+  }
 }
 
 function updateAdminActivity(userId) {
@@ -167,10 +191,12 @@ function updateAdminActivity(userId) {
   if (session && session.adminMode) {
     session.lastAdminActivity = Date.now();
     
+    // Clear existing timer
     if (session.adminInactivityTimer) {
       clearTimeout(session.adminInactivityTimer);
     }
     
+    // Set new timer
     session.adminInactivityTimer = setTimeout(() => {
       disableAdminMode(userId, true);
     }, ADMIN_INACTIVE_TIMEOUT);
@@ -211,12 +237,11 @@ function disableAdminMode(userId, autoDisabled = false) {
 // Check for user inactivity and send thank you message
 setInterval(() => {
   const now = Date.now();
-  const INACTIVITY_THRESHOLD = 15 * 60 * 1000; // 15 minutes
+  const INACTIVITY_THRESHOLD = 15 * 60 * 1000;
   
   for (const [userId, session] of userSessions.entries()) {
     const inactiveDuration = now - session.lastInteraction;
     
-    // Send goodbye message after 15 minutes of inactivity
     if (inactiveDuration >= INACTIVITY_THRESHOLD && inactiveDuration < INACTIVITY_THRESHOLD + 300000 && !session.goodbyeSent) {
       const lang = session.lastLang || 'en';
       const inactivityMsg = {
@@ -229,7 +254,6 @@ setInterval(() => {
       console.log(`👋 Sent goodbye message to inactive user ${userId}`);
     }
     
-    // Clean up old sessions after 30 minutes
     if (inactiveDuration > 1800000) {
       if (session.adminInactivityTimer) {
         clearTimeout(session.adminInactivityTimer);
@@ -238,7 +262,7 @@ setInterval(() => {
       console.log(`🧹 Cleaned up old session for user ${userId}`);
     }
   }
-}, 60000); // Check every minute
+}, 60000);
 
 app.get('/webhook', (req, res) => {
   const mode = req.query['hub.mode'];
@@ -261,7 +285,21 @@ app.post('/webhook', (req, res) => {
       const webhookEvent = entry.messaging[0];
       const senderId = webhookEvent.sender.id;
 
+      // Check if this is a message from the page (admin) or user
       if (webhookEvent.message) {
+        // Check if sender is the page itself (admin replying)
+        if (senderId === PAGE_ID) {
+          // This is an admin message, don't process it
+          console.log('📤 Admin message sent, skipping bot response');
+          return;
+        }
+        
+        // Check if message has 'is_echo' flag (means it's from the page)
+        if (webhookEvent.message.is_echo) {
+          console.log('📤 Echo message (from page), skipping');
+          return;
+        }
+        
         handleMessage(senderId, webhookEvent.message);
       } else if (webhookEvent.postback) {
         handlePostback(senderId, webhookEvent.postback);
@@ -270,6 +308,19 @@ app.post('/webhook', (req, res) => {
     res.status(200).send('EVENT_RECEIVED');
   } else {
     res.sendStatus(404);
+  }
+});
+
+// New endpoint to detect admin replies
+app.post('/webhook/admin-reply', (req, res) => {
+  const { userId } = req.body;
+  
+  if (userId) {
+    console.log(`👨‍💼 Admin replied to user ${userId}, enabling admin mode`);
+    enableAdminMode(userId, true); // Silent enable
+    res.json({ success: true, message: 'Admin mode enabled' });
+  } else {
+    res.status(400).json({ success: false, error: 'userId required' });
   }
 });
 
@@ -296,25 +347,19 @@ async function handleMessage(senderId, message) {
 
   const talkToAdminKeywords = ['talk to admin', 'speak to admin', 'contact admin', 
                                 'magsalita sa admin', 'makipag-usap sa admin',
-                                'pakigsulti sa admin', 'gusto ko admin'];
+                                'pakigsulti sa admin', 'gusto ko admin', 'talk to staff',
+                                'speak to staff', 'contact staff'];
   
   if (talkToAdminKeywords.some(keyword => text.toLowerCase().includes(keyword))) {
     enableAdminMode(senderId);
-    
-    const adminModeMsg = {
-      en: "👨‍💼 Admin mode activated! A clinic staff member has been notified and will respond to you shortly. Meddy is now paused.\n\n(Meddy will automatically reactivate after 15 minutes of admin inactivity)",
-      tl: "👨‍💼 Admin mode activated! Aabisuhan ang clinic staff at sasagutin ka nila. Si Meddy ay naka-pause na.\n\n(Si Meddy ay babalik pagkatapos ng 15 minuto ng walang admin activity)",
-      ceb: "👨‍💼 Admin mode activated! Pahibaw-an ang clinic staff ug tubagon ka nila. Si Meddy gi-pause na.\n\n(Si Meddy mobalik human sa 15 minuto nga walay admin activity)"
-    };
-    
-    sendTextMessage(senderId, adminModeMsg[session.lastLang] || adminModeMsg.en);
     updateAdminActivity(senderId);
     return;
   }
 
+  // If in admin mode, just update activity and don't respond
   if (session.adminMode) {
     updateAdminActivity(senderId);
-    console.log(`💬 Message from user ${senderId} in admin mode - chatbot paused`);
+    console.log(`💬 Message from user ${senderId} in admin mode - bot paused`);
     return;
   }
 
@@ -523,9 +568,9 @@ OTHER SERVICES (ALL FREE for enrolled students):
 - Preventive care tips
 
 TALKING TO ADMIN:
-- Students can type "talk to admin" or "speak to admin" to connect with clinic staff
+- Students can type "talk to admin" or "speak to staff" to connect with clinic staff
 - When admin mode is active, chatbot pauses automatically
-- Chatbot reactivates after 15 minutes of admin inactivity
+- Chatbot reactivates after 15 minutes of staff inactivity
 
 ${conversationContext}
 
@@ -538,7 +583,6 @@ Respond in 2-4 sentences in ${detectedLang === 'ceb' ? 'Bisaya/Cebuano' : detect
   return response.text();
 }
 
-// Basic Mode Response (keyword-based fallback)
 function getBasicResponse(userMessage, session, lang) {
   const lowerMsg = userMessage.toLowerCase();
   
@@ -589,7 +633,6 @@ function getBasicResponse(userMessage, session, lang) {
 
   const langResponses = responses[lang] || responses.en;
 
-  // Keyword matching with better logic
   if (/(hi|hello|hey|kumusta|kamusta|unsay sabay|pregunta|question|help)/i.test(lowerMsg)) {
     return langResponses.greeting;
   } 
@@ -675,10 +718,6 @@ function handlePostback(senderId, postback) {
 
   if (payload === 'TALK_TO_ADMIN') {
     enableAdminMode(senderId);
-    
-    const adminModeMsg = "👨‍💼 Admin mode activated! A clinic staff member has been notified and will respond to you shortly. Meddy is now paused.\n\n(Meddy will automatically reactivate after 15 minutes of admin inactivity)";
-    
-    sendTextMessage(senderId, adminModeMsg);
     updateAdminActivity(senderId);
     return;
   }
@@ -711,7 +750,6 @@ function sendMainMenu(senderId, lang = 'en') {
     return;
   }
 
-  // Only introduce on first interaction
   let menuText;
   if (!session.hasIntroduced) {
     menuText = "🏥 *Saint Joseph College Clinic*\n👋 Hi! I'm Meddy, your clinic assistant!\n\nHow can I help you today?";
@@ -795,9 +833,10 @@ function sendMessage(senderId, message) {
   });
 }
 
+// Admin API endpoints
 app.post('/admin/enable/:userId', (req, res) => {
   const userId = req.params.userId;
-  enableAdminMode(userId);
+  enableAdminMode(userId, true);
   res.json({ success: true, message: `Admin mode enabled for user ${userId}` });
 });
 
@@ -946,4 +985,5 @@ app.listen(PORT, () => {
   console.log(`🔧 Current AI Model: ${currentModel.name} (${currentModel.type})`);
   console.log(`⏱️  Rate limit: ${currentModel.maxRequests} requests per minute`);
   console.log(`📊 Available models: ${AI_MODELS.map(m => m.name).join(', ')}`);
+  console.log(`📄 PAGE_ID configured: ${PAGE_ID ? 'YES ✅' : 'NO ⚠️ (Add to .env file)'}`);
 });
