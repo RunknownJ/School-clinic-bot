@@ -232,6 +232,9 @@ function disableAdminMode(userId, autoDisabled = false) {
     console.log(`🔴 Admin mode DISABLED for user ${userId} ${autoDisabled ? '(auto)' : '(manual)'}`);
     
     if (autoDisabled) {
+      // UPDATE LAST INTERACTION TIME - THIS IS THE KEY FIX!
+      session.lastInteraction = Date.now();
+      
       const lang = session.lastLang || 'en';
       const reactivationMsg = {
         en: "🤖 Meddy is now active again! Feel free to ask me questions about the clinic, or type 'talk to admin' if you need to speak with a staff member.",
@@ -254,8 +257,12 @@ setInterval(() => {
   for (const [userId, session] of userSessions.entries()) {
     const inactiveDuration = now - session.lastInteraction;
     
-    // FIXED: Check goodbyeSent FIRST before sending
-    if (!session.goodbyeSent && inactiveDuration >= INACTIVITY_THRESHOLD && inactiveDuration < INACTIVITY_THRESHOLD + 300000) {
+    // ONLY SEND GOODBYE IF: not sent yet, past threshold, NOT in admin mode
+    if (!session.goodbyeSent && 
+        !session.adminMode && 
+        inactiveDuration >= INACTIVITY_THRESHOLD && 
+        inactiveDuration < INACTIVITY_THRESHOLD + 120000) { // 2-minute window
+      
       const lang = session.lastLang || 'en';
       const inactivityMsg = {
         en: "Thank you for messaging the Saint Joseph College Clinic! 😊\n\nIf you need any assistance in the future, feel free to message us anytime. Stay healthy and take care! 👋",
@@ -267,6 +274,7 @@ setInterval(() => {
       console.log(`👋 Sent goodbye message to inactive user ${userId}`);
     }
     
+    // Clean up very old sessions (30+ minutes)
     if (inactiveDuration > 1800000) {
       if (session.adminInactivityTimer) {
         clearTimeout(session.adminInactivityTimer);
