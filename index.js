@@ -333,8 +333,6 @@ app.post('/webhook/admin-reply', (req, res) => {
   }
 });
 
-// Replace the handleMessage function with this fixed version
-
 async function handleMessage(senderId, message) {
   const text = message.text?.trim() || '';
   if (!text) return;
@@ -348,7 +346,7 @@ async function handleMessage(senderId, message) {
     return;
   }
 
-  // ✅ Then check if conversation has already ended
+  // ✅ CHECK IF CONVERSATION ENDED - MOVED UP BEFORE THANK YOU DETECTION
   if (session.goodbyeSent) {
     console.log(`⏭️  Skipping message from ${senderId} - conversation already ended`);
     return;
@@ -362,7 +360,8 @@ async function handleMessage(senderId, message) {
                                            text.toLowerCase().startsWith(keyword + ' '));
   const isGoodbye = goodbyeKeywords.some(keyword => text.toLowerCase().includes(keyword));
   
-  if (isThankYou || isGoodbye) {
+  
+if (isThankYou || isGoodbye) {
     // Mark session as conversation ended
     session.goodbyeSent = true;
     
