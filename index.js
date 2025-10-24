@@ -258,11 +258,11 @@ setInterval(() => {
   for (const [userId, session] of userSessions.entries()) {
     const inactiveDuration = now - session.lastInteraction;
     
-    // Send goodbye ONLY if: not sent yet, not in admin mode, and JUST crossed threshold
+    // ✅ FIXED: Only send if NOT sent AND within the first check window
     if (!session.goodbyeSent && 
         !session.adminMode && 
         inactiveDuration >= INACTIVITY_THRESHOLD &&
-        inactiveDuration < (INACTIVITY_THRESHOLD + 60000)) {  // ← ADD THIS LINE
+        inactiveDuration < (INACTIVITY_THRESHOLD + 61000)) { // 1-minute window
       
       const lang = session.lastLang || 'en';
       const inactivityMsg = {
@@ -271,7 +271,7 @@ setInterval(() => {
         ceb: "Salamat sa pag-message sa Saint Joseph College Clinic! 😊\n\nKung kinahanglan nimo og tabang sa umaabot, message lang anytime. Pag-amping! 👋"
       };
       sendTextMessage(userId, inactivityMsg[lang] || inactivityMsg.en);
-      session.goodbyeSent = true;
+      session.goodbyeSent = true; // ✅ Set flag IMMEDIATELY
       console.log(`👋 Sent goodbye message to inactive user ${userId}`);
     }
     
@@ -354,6 +354,13 @@ async function handleMessage(senderId, message) {
     console.log(`💬 Message from user ${senderId} in admin mode - bot paused`);
     return;
   }
+    // ✅ NEW: Reset goodbye flag if user returns after inactivity
+  const timeSinceGoodbye = Date.now() - session.lastInteraction;
+  if (session.goodbyeSent && timeSinceGoodbye > 15 * 60 * 1000) {
+    session.goodbyeSent = false; // User came back, reset the flag
+    console.log(`🔄 User ${senderId} returned after goodbye, resetting flag`);
+  }
+
 
   // ✅ CHECK IF CONVERSATION ENDED - MOVED UP BEFORE THANK YOU DETECTION
   if (session.goodbyeSent) {
