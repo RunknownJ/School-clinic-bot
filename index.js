@@ -348,25 +348,19 @@ async function handleMessage(senderId, message) {
 
   const session = getUserSession(senderId);
 
-  // ✅ CHECK ADMIN MODE FIRST - before any other processing
+  // ✅ CHECK ADMIN MODE FIRST
   if (session.adminMode) {
     updateAdminActivity(senderId);
     console.log(`💬 Message from user ${senderId} in admin mode - bot paused`);
     return;
   }
-    // ✅ NEW: Reset goodbye flag if user returns after inactivity
-  const timeSinceGoodbye = Date.now() - session.lastInteraction;
-  if (session.goodbyeSent && timeSinceGoodbye > 15 * 60 * 1000) {
-    session.goodbyeSent = false; // User came back, reset the flag
-    console.log(`🔄 User ${senderId} returned after goodbye, resetting flag`);
-  }
 
-
-  // ✅ CHECK IF CONVERSATION ENDED - MOVED UP BEFORE THANK YOU DETECTION
+  // ✅ CHECK IF CONVERSATION ENDED - if so, ignore ALL messages
   if (session.goodbyeSent) {
     console.log(`⏭️  Skipping message from ${senderId} - conversation already ended`);
     return;
   }
+
 
   // More specific thank you detection - check if message is PRIMARILY thanking
   const thankYouKeywords = ['thank', 'thanks', 'salamat', 'salamat kaayo', 'thank you', 'ty'];
