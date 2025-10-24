@@ -258,10 +258,11 @@ setInterval(() => {
   for (const [userId, session] of userSessions.entries()) {
     const inactiveDuration = now - session.lastInteraction;
     
-    // FIXED: Only send goodbye ONCE when crossing the threshold
+    // Send goodbye ONLY if: not sent yet, not in admin mode, and JUST crossed threshold
     if (!session.goodbyeSent && 
         !session.adminMode && 
-        inactiveDuration >= INACTIVITY_THRESHOLD) {
+        inactiveDuration >= INACTIVITY_THRESHOLD &&
+        inactiveDuration < (INACTIVITY_THRESHOLD + 60000)) {  // ← ADD THIS LINE
       
       const lang = session.lastLang || 'en';
       const inactivityMsg = {
@@ -270,7 +271,7 @@ setInterval(() => {
         ceb: "Salamat sa pag-message sa Saint Joseph College Clinic! 😊\n\nKung kinahanglan nimo og tabang sa umaabot, message lang anytime. Pag-amping! 👋"
       };
       sendTextMessage(userId, inactivityMsg[lang] || inactivityMsg.en);
-      session.goodbyeSent = true; // Set flag IMMEDIATELY to prevent duplicates
+      session.goodbyeSent = true;
       console.log(`👋 Sent goodbye message to inactive user ${userId}`);
     }
     
