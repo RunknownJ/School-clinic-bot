@@ -232,8 +232,9 @@ function disableAdminMode(userId, autoDisabled = false) {
     console.log(`🔴 Admin mode DISABLED for user ${userId} ${autoDisabled ? '(auto)' : '(manual)'}`);
     
     if (autoDisabled) {
-      // UPDATE LAST INTERACTION TIME - THIS IS THE KEY FIX!
+      // RESET both flags to give user a fresh start
       session.lastInteraction = Date.now();
+      session.goodbyeSent = false; // Reset to allow new goodbye if user remains inactive
       
       const lang = session.lastLang || 'en';
       const reactivationMsg = {
@@ -257,11 +258,10 @@ setInterval(() => {
   for (const [userId, session] of userSessions.entries()) {
     const inactiveDuration = now - session.lastInteraction;
     
-    // ONLY SEND GOODBYE IF: not sent yet, past threshold, NOT in admin mode
+    // FIXED: Only send goodbye ONCE when crossing the threshold
     if (!session.goodbyeSent && 
         !session.adminMode && 
-        inactiveDuration >= INACTIVITY_THRESHOLD && 
-        inactiveDuration < INACTIVITY_THRESHOLD + 120000) { // 2-minute window
+        inactiveDuration >= INACTIVITY_THRESHOLD) {
       
       const lang = session.lastLang || 'en';
       const inactivityMsg = {
@@ -270,7 +270,7 @@ setInterval(() => {
         ceb: "Salamat sa pag-message sa Saint Joseph College Clinic! 😊\n\nKung kinahanglan nimo og tabang sa umaabot, message lang anytime. Pag-amping! 👋"
       };
       sendTextMessage(userId, inactivityMsg[lang] || inactivityMsg.en);
-      session.goodbyeSent = true;
+      session.goodbyeSent = true; // Set flag IMMEDIATELY to prevent duplicates
       console.log(`👋 Sent goodbye message to inactive user ${userId}`);
     }
     
