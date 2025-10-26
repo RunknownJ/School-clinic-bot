@@ -145,7 +145,7 @@ function getUserSession(userId) {
       adminMode: false,
       lastAdminActivity: null,
       adminInactivityTimer: null,
-      goodbyeSent: false,
+      conversationEnded: false,
       hasIntroduced: false,
       pageId: null
     });
@@ -154,7 +154,6 @@ function getUserSession(userId) {
   const session = userSessions.get(userId);
   session.lastInteraction = Date.now();
   session.conversationCount++;
-  // REMOVED: session.goodbyeSent = false;  <-- This was resetting the flag!
   
   return session;
 }
@@ -232,9 +231,9 @@ function disableAdminMode(userId, autoDisabled = false) {
     console.log(`🔴 Admin mode DISABLED for user ${userId} ${autoDisabled ? '(auto)' : '(manual)'}`);
     
     if (autoDisabled) {
-      // RESET both flags to give user a fresh start
+      // Reset conversation state when admin mode ends
       session.lastInteraction = Date.now();
-      session.goodbyeSent = false; // Reset to allow new goodbye if user remains inactive
+      session.conversationEnded = false;
       
       const lang = session.lastLang || 'en';
       const reactivationMsg = {
@@ -251,29 +250,13 @@ function disableAdminMode(userId, autoDisabled = false) {
   }
 }
 
+// REMOVED: Automatic inactivity goodbye interval
+// Clean up old sessions only (30+ minutes)
 setInterval(() => {
   const now = Date.now();
-  const INACTIVITY_THRESHOLD = 15 * 60 * 1000;
   
   for (const [userId, session] of userSessions.entries()) {
     const inactiveDuration = now - session.lastInteraction;
-    
-    // ✅ FIXED: Only send if NOT sent AND within the first check window
-    if (!session.goodbyeSent && 
-        !session.adminMode && 
-        inactiveDuration >= INACTIVITY_THRESHOLD &&
-        inactiveDuration < (INACTIVITY_THRESHOLD + 61000)) { // 1-minute window
-      
-      const lang = session.lastLang || 'en';
-      const inactivityMsg = {
-        en: "Thank you for messaging the Saint Joseph College Clinic! 😊\n\nIf you need any assistance in the future, feel free to message us anytime. Stay healthy and take care! 👋",
-        tl: "Salamat sa pag-message sa Saint Joseph College Clinic! 😊\n\nKung kailangan mo ng tulong sa hinaharap, mag-message ka lang anytime. Mag-ingat ka! 👋",
-        ceb: "Salamat sa pag-message sa Saint Joseph College Clinic! 😊\n\nKung kinahanglan nimo og tabang sa umaabot, message lang anytime. Pag-amping! 👋"
-      };
-      sendTextMessage(userId, inactivityMsg[lang] || inactivityMsg.en);
-      session.goodbyeSent = true; // ✅ Set flag IMMEDIATELY
-      console.log(`👋 Sent goodbye message to inactive user ${userId}`);
-    }
     
     // Clean up very old sessions (30+ minutes)
     if (inactiveDuration > 1800000) {
@@ -306,7 +289,7 @@ app.post('/webhook', (req, res) => {
     body.entry.forEach(entry => {
       const webhookEvent = entry.messaging[0];
       const senderId = webhookEvent.sender.id;
-      const pageId = entry.id; // ADDED: Get the page ID from entry
+      const pageId = entry.id;
 
       // UPDATED: Store the page ID in session
       const session = getUserSession(senderId);
@@ -356,45 +339,58 @@ async function handleMessage(senderId, message) {
   }
 
   // ✅ CHECK IF CONVERSATION ENDED - if so, ignore ALL messages
-  if (session.goodbyeSent) {
+  if (session.conversationEnded) {
     console.log(`⏭️  Skipping message from ${senderId} - conversation already ended`);
     return;
   }
 
-
-  // More specific thank you detection - check if message is PRIMARILY thanking
-  const thankYouKeywords = ['thank', 'thanks', 'salamat', 'salamat kaayo', 'thank you', 'ty'];
-  const goodbyeKeywords = ['bye', 'goodbye', 'see you', 'paalam', 'sige', 'adios', 'hangtod'];
+  // ✅ DETECT FAREWELL/THANK YOU MESSAGES
+  const thankYouKeywords = ['thank', 'thanks', 'salamat', 'salamat kaayo', 'thank you', 'ty', 'tysm', 'thnks', 'thnx'];
+  const goodbyeKeywords = ['bye', 'goodbye', 'good bye', 'see you', 'paalam', 'sige', 'adios', 'hangtod', 'bye bye', 'bbye'];
   
-  const isThankYou = thankYouKeywords.some(keyword => text.toLowerCase() === keyword || 
-                                           text.toLowerCase().startsWith(keyword + ' '));
-  const isGoodbye = goodbyeKeywords.some(keyword => text.toLowerCase().includes(keyword));
+  const lowerText = text.toLowerCase();
   
+  // Check if message is primarily a thank you or goodbye
+  const isThankYou = thankYouKeywords.some(keyword => 
+    lowerText === keyword || 
+    lowerText.startsWith(keyword + ' ') ||
+    lowerText.startsWith(keyword + ',') ||
+    lowerText.endsWith(' ' + keyword) ||
+    lowerText.endsWith(', ' + keyword)
+  );
   
-if (isThankYou || isGoodbye) {
-    // Mark session as conversation ended
-    session.goodbyeSent = true;
+  const isGoodbye = goodbyeKeywords.some(keyword => 
+    lowerText.includes(keyword)
+  );
+  
+  // ✅ ONLY respond with farewell if user explicitly says goodbye/thank you
+  if (isThankYou || isGoodbye) {
+    session.conversationEnded = true;
     
     const farewellMsg = {
       en: "You're welcome! Thank you for messaging the Saint Joseph College Clinic. Stay healthy! 😊\n\nFeel free to reach out anytime you need assistance. Take care! 👋",
       tl: "Walang anuman! Salamat sa pag-message sa Saint Joseph College Clinic. Mag-ingat ka! 😊\n\nBumalik ka lang kung kailangan mo ng tulong. Ingat! 👋",
       ceb: "Walay sapayan! Salamat sa pag-message sa Saint Joseph College Clinic. Pag-amping! 😊\n\nBalik lang kung kinahanglan nimo og tabang. Amping! 👋"
     };
+    
     sendTextMessage(senderId, farewellMsg[session.lastLang] || farewellMsg.en);
-    return; // IMPORTANT: Stop processing here
+    console.log(`👋 User ${senderId} said goodbye - conversation ended`);
+    return;
   }
 
+  // ✅ HANDLE "TALK TO ADMIN" REQUEST
   const talkToAdminKeywords = ['talk to admin', 'speak to admin', 'contact admin', 
                                 'magsalita sa admin', 'makipag-usap sa admin',
                                 'pakigsulti sa admin', 'gusto ko admin', 'talk to staff',
                                 'speak to staff', 'contact staff'];
   
-  if (talkToAdminKeywords.some(keyword => text.toLowerCase().includes(keyword))) {
+  if (talkToAdminKeywords.some(keyword => lowerText.includes(keyword))) {
     enableAdminMode(senderId);
     updateAdminActivity(senderId);
     return;
   }
 
+  // ✅ NORMAL MESSAGE PROCESSING
   try {
     sendTypingIndicator(senderId, true);
     console.log('📨 User message:', text);
@@ -742,6 +738,11 @@ function handlePostback(senderId, postback) {
     return;
   }
 
+  // Reset conversation ended flag when user interacts with menu
+  if (session.conversationEnded) {
+    session.conversationEnded = false;
+  }
+
   if (payload === 'MAIN_MENU') {
     session.menuLevel = 'main';
     sendMainMenu(senderId, 'en');
@@ -779,6 +780,11 @@ function sendMainMenu(senderId, lang = 'en') {
   const session = getUserSession(senderId);
   
   if (session && session.adminMode) {
+    return;
+  }
+
+  // Don't send menu if conversation has ended
+  if (session && session.conversationEnded) {
     return;
   }
 
@@ -894,6 +900,7 @@ app.get('/admin/status/:userId', (req, res) => {
       lastAdminActivity: session.lastAdminActivity,
       lastLang: session.lastLang,
       conversationCount: session.conversationCount,
+      conversationEnded: session.conversationEnded,
       pageId: session.pageId
     });
   }
@@ -907,6 +914,7 @@ app.get('/admin/sessions', (req, res) => {
       adminMode: session.adminMode,
       lastLang: session.lastLang,
       conversationCount: session.conversationCount,
+      conversationEnded: session.conversationEnded,
       lastInteraction: new Date(session.lastInteraction).toISOString(),
       pageId: session.pageId
     });
