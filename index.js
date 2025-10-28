@@ -619,7 +619,9 @@ function getBasicResponse(userMessage, session, lang) {
   const responses = {
     en: {
       greeting: "👋 Hi! I'm Meddy, your clinic assistant. How can I help you today?",
-      location: "📍 Main Campus Clinic: Ground Floor beside the Theology Office\n🦷 Dental Clinic: Junior High School Department\n\n🕐 Hours:\n• Mon-Fri: 8:30 AM–12:00 NN, 1:30 PM–5:30 PM\n• College Clinic: Extended until 8:30 PM\n• Saturday: 8:00 AM–12:00 NN (half-day)\n• Closed Sundays & holidays",      hours: "🕐 Clinic Hours:\n• Monday-Friday: 8:30 AM – 12:00 NN, 1:30 PM – 5:30 PM\n• College Clinic: Extended until 8:30 PM\n• Saturday: 8:00 AM – 12:00 NN (half-day)\n• Closed on Sundays and holidays",      doctor: "👨‍⚕️ Doctor's Schedule:\n- Tuesday, Wednesday, Thursday: 9:00 AM - 12:00 NN\n- Outside these hours, students can still visit for basic care.",
+      location: "📍 Main Campus Clinic: Ground Floor beside the Theology Office\n🦷 Dental Clinic: Junior High School Department\n\n🕐 Hours:\n• Mon-Fri: 8:30 AM–12:00 NN, 1:30 PM–5:30 PM\n• College Clinic: Extended until 8:30 PM\n• Saturday: 8:00 AM–12:00 NN (half-day)\n• Closed Sundays & holidays",
+      hours: "🕐 Clinic Hours:\n• Monday-Friday: 8:30 AM – 12:00 NN, 1:30 PM – 5:30 PM\n• College Clinic: Extended until 8:30 PM\n• Saturday: 8:00 AM – 12:00 NN (half-day)\n• Closed on Sundays and holidays",
+       doctor: "👨‍⚕️ Doctor's Schedule:\n- Tuesday, Wednesday, Thursday: 9:00 AM - 12:00 NN\n- Outside these hours, students can still visit for basic care.",
       dentist: "🦷 Dentist Schedule:\n- Mon-Fri: 8:30-11:30 AM & 1:30-4:30 PM\n- Saturday: 8:00-11:30 AM\n- 10 extraction slots per session\n- FREE anesthesia during extraction",
       medicines: "💊 Available Medicines (FREE):\n- Paracetamol, Dycolsen, Dycolgen, Loperamide, Erceflora, Antacid\n- Maximum 2 medicines per person\n- Parental consent required for minors",
       extraction: "🦷 Tooth Extraction Process:\n1. Visit Main Campus Clinic\n2. Get referral slip\n3. Go to Dental Clinic at Junior High School\n4. Anesthesia is FREE!",
@@ -631,7 +633,9 @@ function getBasicResponse(userMessage, session, lang) {
     },
     tl: {
       greeting: "👋 Kumusta! Ako si Meddy, ang clinic assistant. Paano kita matutulungan ngayon?",
-      location: "📍 Main Campus Clinic: Ground Floor beside the Theology Office\n🦷 Dental Clinic: Junior High School Department\n\n🕐 Oras:\n• Lun-Biy: 8:30 AM–12:00 NN, 1:30 PM–5:30 PM\n• College Clinic: Extended hanggang 8:30 PM\n• Sabado: 8:00 AM–12:00 NN (half-day)\n• Sarado tuwing Linggo at holiday",      hours: "🕐 Oras ng Clinic:\n• Lunes-Biyernes: 8:30 AM – 12:00 NN, 1:30 PM – 5:30 PM\n• College Clinic: Extended hanggang 8:30 PM\n• Sabado: 8:00 AM – 12:00 NN (half-day)\n• Sarado tuwing Linggo at holiday",      doctor: "👨‍⚕️ Schedule ng Doktor:\n- Martes, Miyerkules, Huwebes: 9:00 AM - 12:00 NN\n- Pwede pa rin bisitahin ang clinic para sa basic care.",
+      location: "📍 Main Campus Clinic: Ground Floor beside the Theology Office\n🦷 Dental Clinic: Junior High School Department\n\n🕐 Oras:\n• Lun-Biy: 8:30 AM–12:00 NN, 1:30 PM–5:30 PM\n• College Clinic: Extended hanggang 8:30 PM\n• Sabado: 8:00 AM–12:00 NN (half-day)\n• Sarado tuwing Linggo at holiday",
+      hours: "🕐 Oras ng Clinic:\n• Lunes-Biyernes: 8:30 AM – 12:00 NN, 1:30 PM – 5:30 PM\n• College Clinic: Extended hanggang 8:30 PM\n• Sabado: 8:00 AM – 12:00 NN (half-day)\n• Sarado tuwing Linggo at holiday",    
+       doctor: "👨‍⚕️ Schedule ng Doktor:\n- Martes, Miyerkules, Huwebes: 9:00 AM - 12:00 NN\n- Pwede pa rin bisitahin ang clinic para sa basic care.",
       dentist: "🦷 Schedule ng Dentista:\n- Lun-Biy: 8:30-11:30 AM & 1:30-4:30 PM\n- Sabado: 8:00-11:30 AM\n- 10 extraction slots per session\n- LIBRE ang anesthesia",
       medicines: "💊 Available na Gamot (LIBRE):\n- Paracetamol, Dycolsen, Dycolgen, Loperamide, Erceflora, Antacid\n- Maximum 2 gamot per tao\n- Kailangan ng consent ng magulang para sa menor de edad",
       extraction: "🦷 Proseso ng Tooth Extraction:\n1. Pumunta sa Main Campus Clinic\n2. Kumuha ng referral slip\n3. Pumunta sa Dental Clinic sa Junior High School\n4. Anesthesia ay LIBRE!",
@@ -643,7 +647,9 @@ function getBasicResponse(userMessage, session, lang) {
     },
     ceb: {
       greeting: "👋 Kumusta! Ako si Meddy, ang clinic assistant. Unsaon nako pagtabang nimo?",
-      location: "📍 Main Campus Clinic: Ground Floor beside the Theology Office\n🦷 Dental Clinic: Junior High School Department\n\n🕐 Oras:\n• Lun-Biy: 8:30 AM–12:00 NN, 1:30 PM–5:30 PM\n• College Clinic: Extended hangtod 8:30 PM\n• Sabado: 8:00 AM–12:00 NN (half-day)\n• Sarado tuwing Domingo ug holiday",      hours: "🕐 Oras sa Clinic:\n• Lunes-Biyernes: 8:30 AM – 12:00 NN, 1:30 PM – 5:30 PM\n• College Clinic: Extended hangtod 8:30 PM\n• Sabado: 8:00 AM – 12:00 NN (half-day)\n• Sarado tuwing Domingo ug holiday",      doctor: "👨‍⚕️ Schedule sa Doktor:\n- Martes, Miyerkules, Huwebes: 9:00 AM - 12:00 NN\n- Pwede gihapon moduaw sa clinic para sa basic care.",
+      location: "📍 Main Campus Clinic: Ground Floor beside the Theology Office\n🦷 Dental Clinic: Junior High School Department\n\n🕐 Oras:\n• Lun-Biy: 8:30 AM–12:00 NN, 1:30 PM–5:30 PM\n• College Clinic: Extended hangtod 8:30 PM\n• Sabado: 8:00 AM–12:00 NN (half-day)\n• Sarado tuwing Domingo ug holiday",
+      hours: "🕐 Oras sa Clinic:\n• Lunes-Biyernes: 8:30 AM – 12:00 NN, 1:30 PM – 5:30 PM\n• College Clinic: Extended hangtod 8:30 PM\n• Sabado: 8:00 AM – 12:00 NN (half-day)\n• Sarado tuwing Domingo ug holiday",   
+      doctor: "👨‍⚕️ Schedule sa Doktor:\n- Martes, Miyerkules, Huwebes: 9:00 AM - 12:00 NN\n- Pwede gihapon moduaw sa clinic para sa basic care.",
       dentist: "🦷 Schedule sa Dentista:\n- Lun-Biy: 8:30-11:30 AM & 1:30-4:30 PM\n- Sabado: 8:00-11:30 AM\n- 10 extraction slots per session\n- LIBRE ang anesthesia",
       medicines: "💊 Available nga Tambal (LIBRE):\n- Paracetamol, Dycolsen, Dycolgen, Loperamide, Erceflora, Antacid\n- Maximum 2 ka tambal per tawo\n- Kinahanglan og consent sa ginikanan para sa menor de edad",
       extraction: "🦷 Proseso sa Tooth Extraction:\n1. Adto sa Main Campus Clinic\n2. Kuha og referral slip\n3. Adto sa Dental Clinic sa Junior High School\n4. Anesthesia LIBRE!",
