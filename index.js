@@ -1027,6 +1027,52 @@ app.get('/test-models', async (req, res) => {
   }
 });
 
+// ✅ ADD THIS NEW ENDPOINT HERE (after /test-models, before app.listen)
+app.get('/test-gemini', async (req, res) => {
+  const testMessage = req.query.message || 'What should I do if I have a toothache?';
+  
+  try {
+    const session = {
+      conversationHistory: [],
+      lastLang: 'en'
+    };
+    
+    const currentModel = getCurrentModel();
+    console.log(`🧪 Testing with model: ${currentModel.name}`);
+    
+    if (currentModel.type !== 'gemini') {
+      return res.json({
+        success: false,
+        error: 'Current model is not Gemini',
+        currentModel: currentModel.name,
+        modelType: currentModel.type,
+        hint: 'Gemini might have failed. Check your API key or try /admin/switch-model/0'
+      });
+    }
+    
+    const response = await getGeminiResponse(testMessage, session, 'en', currentModel.name);
+    
+    res.json({
+      success: true,
+      model: currentModel.name,
+      modelType: currentModel.type,
+      userMessage: testMessage,
+      geminiResponse: response,
+      isGemini: true,
+      note: 'This is how Gemini AI responds - should be conversational and natural'
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      model: getCurrentModel().name,
+      hint: 'Check your GEMINI_API_KEY in .env file'
+    });
+  }
+});
+
+
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   const currentModel = getCurrentModel();
