@@ -339,12 +339,6 @@ async function handleMessage(senderId, message) {
     return;
   }
 
-  // ✅ CHECK IF CONVERSATION ENDED - if so, ignore ALL messages
-  if (session.conversationEnded) {
-    console.log(`⏭️  Skipping message from ${senderId} - conversation already ended`);
-    return;
-  }
-
   // ✅ DETECT FAREWELL/THANK YOU MESSAGES
   const thankYouKeywords = ['thank', 'thanks', 'salamat', 'salamat kaayo', 'thank you', 'ty', 'tysm', 'thnks', 'thnx'];
   const goodbyeKeywords = ['bye', 'goodbye', 'good bye', 'see you', 'paalam', 'sige', 'adios', 'hangtod', 'bye bye', 'bbye'];
@@ -363,6 +357,14 @@ async function handleMessage(senderId, message) {
   const isGoodbye = goodbyeKeywords.some(keyword => 
     lowerText.includes(keyword)
   );
+
+  // ✅ NEW: Check if conversation ended but user is starting a new conversation
+  if (session.conversationEnded && !isThankYou && !isGoodbye) {
+    console.log(`🔄 User ${senderId} starting new conversation after goodbye`);
+    session.conversationEnded = false;
+    session.conversationHistory = []; // Reset history for fresh start
+    // Continue processing the message below
+  }
   
   // ✅ ONLY respond with farewell if user explicitly says goodbye/thank you
   if (isThankYou || isGoodbye) {
